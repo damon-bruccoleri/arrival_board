@@ -39842,3 +39842,898 @@ cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
 + ./arrival_board
 Background image loaded: Steampunk bus image.png
 Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 00:50:32 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 00:55:26 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 00:59:19 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 01:01:53 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+curl: (28) SSL connection timeout
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 01:04:35 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 01:07:05 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 01:09:22 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 01:11:57 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 01:38:51 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 01:45:54 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sat 14 Feb 01:56:00 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon
+curl: (28) Failed to connect to bustime.mta.info port 443 after 4000 ms: Timeout was reached
+curl: (28) SSL connection timeout
+curl: (28) SSL connection timeout
+curl: (28) SSL connection timeout
+curl: (28) SSL connection timeout
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sun 15 Feb 10:11:05 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sun 15 Feb 10:15:22 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sun 15 Feb 12:42:58 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Header logo loaded: 32x32 logo.png
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sun 15 Feb 12:58:56 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Header logo loaded: 32x32 logo.png
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sun 15 Feb 13:05:18 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Header logo loaded: 32x32 logo.png
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sun 15 Feb 13:46:59 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Logo loaded: Damon Logo Large.png
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sun 15 Feb 13:50:19 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Logo loaded: Damon Logo Large.png
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon
++ cd /home/damon/arrival_board
++ '[' -f /home/damon/arrival_board/arrival_board.env ']'
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
+++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
+++ STOP_ID=501627
+++ ROUTE_FILTER=
+++ POLL_SECONDS=10
+++ SDL_VIDEODRIVER=kmsdrm
+++ SDL_RENDER_DRIVER=software
+++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
+++ SOUND_FLIP=/home/damon/arrival_board/flip.wav
+++ TILE_COLS=2
+++ MAX_TILES=12
++ set +a
++ ulimit -n 16384
++ setterm -blank 0 -powerdown 0 -powersave off
+[9;0][14;0]+ printf '\033[?25l'
+[?25l+ echo '=== run_arrival_board.sh ==='
+=== run_arrival_board.sh ===
++ date
+Sun 15 Feb 14:27:07 EST 2026
+++ id -un
+++ id -u
+++ ulimit -n
++ echo 'USER=damon UID=1000 ULIMIT_NOFILE=16384'
+USER=damon UID=1000 ULIMIT_NOFILE=16384
++ echo 'ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>'
+ENV: SDL_VIDEODRIVER=kmsdrm SDL_RENDER_DRIVER=software DISPLAY=<unset>
++ echo 'CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10'
+CFG: STOP_ID=501627 ROUTE_FILTER= POLL_SECONDS=10
++ true
++ echo '--- build ---'
+--- build ---
++ make clean
+rm -f main.o tile.o arrival_board
++ make -j USE_SDL_IMAGE=1
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o main.o main.c
+cc -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE -I/usr/include/SDL2 -D_REENTRANT -DUSE_SDL_IMAGE -c -o tile.o tile.c
+cc  -o arrival_board main.o tile.o -lSDL2 -lSDL2_ttf -lcjson -lm -lSDL2_image
++ echo '--- run loop ---'
+--- run loop ---
++ ./arrival_board
+Background image loaded: Steampunk bus image.png
+Steam puff texture loaded
+Logo loaded: Damon Logo Large.png
+Symbol font loaded: /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf (pt 58) for weather icon

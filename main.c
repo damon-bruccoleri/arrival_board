@@ -408,33 +408,37 @@ static int fetch_mta_arrivals(Arrival *arr, int max_arr,
     return count;
 }
 
-/* Open-Meteo weather code -> Unicode symbol (UTF-8 encoded directly) */
+/* Open-Meteo weather code -> Unicode symbol. Use hex UTF-8 so encoding is independent of source file. */
 static void icon_for_code(int code, char *out, size_t outsz){
-    /* Use Unicode characters - ensure proper UTF-8 encoding and null termination */
-    const char *sym = "\342\230\201";  /* ☁ cloud (U+2601) - UTF-8: E2 98 81 */
-    if(code == 0) sym = "\342\230\200";  /* ☀ sun (U+2600) - UTF-8: E2 98 80 */
-    else if(code == 1 || code == 2) sym = "\342\233\205";  /* ⛅ sun behind cloud (U+26C5) - UTF-8: E2 9B 85 */
-    else if(code == 3 || code == 45 || code == 48) sym = "\342\230\201";  /* ☁ cloud (U+2601) */
-    else if(code >= 51 && code <= 57) sym = "\342\230\224";  /* ☔ umbrella with rain (U+2614) - UTF-8: E2 98 94 */
-    else if(code >= 61 && code <= 67) sym = "\342\230\224";  /* ☔ umbrella with rain (U+2614) */
-    else if(code >= 71 && code <= 77) sym = "\342\235\204";  /* ❄ snowflake (U+2744) - UTF-8: E2 9D 84 */
-    else if(code >= 80 && code <= 82) sym = "\342\230\224";  /* ☔ umbrella with rain (U+2614) */
-    else if(code >= 95) sym = "\342\232\241";  /* ⚡ lightning (U+26A1) - UTF-8: E2 9A A1 */
-    else if(code == 96 || code == 99) sym = "\342\232\241";  /* ⚡ lightning (U+26A1) */
-    /* Copy with explicit length to ensure proper UTF-8 handling */
-    size_t len = strlen(sym);
-    if(len < outsz){
-        memcpy(out, sym, len);
-        out[len] = '\0';
-    } else {
-        out[0] = '\0';
+    const char *sym;
+    switch(code){
+        case 0:   sym = "\xE2\x98\x80"; break;  /* ☀ U+2600 */
+        case 1:
+        case 2:   sym = "\xE2\x9B\x85"; break;  /* ⛅ U+26C5 */
+        case 3:
+        case 45:
+        case 48:  sym = "\xE2\x98\x81"; break;  /* ☁ U+2601 */
+        default:
+            if(code >= 51 && code <= 57) sym = "\xE2\x98\x94";   /* ☔ U+2614 */
+            else if(code >= 61 && code <= 67) sym = "\xE2\x98\x94";
+            else if(code >= 71 && code <= 77) sym = "\xE2\x9D\x84"; /* ❄ U+2744 */
+            else if(code >= 80 && code <= 82) sym = "\xE2\x98\x94";
+            else if(code >= 95 || code == 96 || code == 99) sym = "\xE2\x9A\xA1"; /* ⚡ U+26A1 */
+            else sym = "\xE2\x98\x81";  /* ☁ default */
+            break;
     }
+    size_t len = strlen(sym);
+    if(len + 1 <= outsz){ memcpy(out, sym, len + 1); }
+    else { out[0] = '\0'; }
 }
 
+/* Geocode a place string to lat/lon (e.g. "Stop Name" + suffix). Suffix from WEATHER_GEOCODE_SUFFIX or ", New York City". */
 static int geocode_stop_to_latlon(const char *stop_name, double *olat, double *olon){
     if(!stop_name || !*stop_name) return 0;
+    const char *suffix = getenv("WEATHER_GEOCODE_SUFFIX");
+    if(!suffix || !*suffix) suffix = ", New York City";
     char q[512], enc[1024];
-    snprintf(q, sizeof(q), "%s, New York City", stop_name);
+    snprintf(q, sizeof(q), "%s%s", stop_name, suffix);
     urlencode(enc, sizeof(enc), q);
 
     char url[1400];
@@ -462,12 +466,27 @@ static int geocode_stop_to_latlon(const char *stop_name, double *olat, double *o
     return 1;
 }
 
+/* Weather is tied to the stop when possible: STOP_LAT/STOP_LON (this stop) or geocode of stop name, else WEATHER_LAT/LON fallback. */
 static void fetch_weather(Weather *w, const char *stop_name){
     if(!w) return;
 
     time_t now = time(NULL);
     if(w->last_fetch && difftime(now, w->last_fetch) < 600) return;
 
+    if(fabs(w->lat) < 0.001 || fabs(w->lon) < 0.001){
+        const char *slat = getenv("STOP_LAT");
+        const char *slon = getenv("STOP_LON");
+        if(slat && slon){
+            w->lat = atof(slat);
+            w->lon = atof(slon);
+        }
+    }
+    if(fabs(w->lat) < 0.001 || fabs(w->lon) < 0.001){
+        double lat=0, lon=0;
+        if(geocode_stop_to_latlon(stop_name, &lat, &lon)){
+            w->lat = lat; w->lon = lon;
+        }
+    }
     if(fabs(w->lat) < 0.001 || fabs(w->lon) < 0.001){
         const char *elat = getenv("WEATHER_LAT");
         const char *elon = getenv("WEATHER_LON");
@@ -477,13 +496,8 @@ static void fetch_weather(Weather *w, const char *stop_name){
         }
     }
     if(fabs(w->lat) < 0.001 || fabs(w->lon) < 0.001){
-        double lat=0, lon=0;
-        if(geocode_stop_to_latlon(stop_name, &lat, &lon)){
-            w->lat = lat; w->lon = lon;
-        } else {
-            w->lat = 40.7128;
-            w->lon = -74.0060;
-        }
+        w->lat = 40.7128;
+        w->lon = -74.0060;
     }
 
     char url[1024];
@@ -613,7 +627,9 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
                       Weather *wx,
                       Arrival *arr, int n,
                       SDL_Texture *bg_tex,
-                      SDL_Texture *steam_tex) {
+                      SDL_Texture *steam_tex,
+                      SDL_Texture *logo_tex,
+                      TTF_Font *symbol_font) {
     SDL_Color white = {255,255,255,255};
     SDL_Color dim   = {210,210,210,255};
 
@@ -650,9 +666,9 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
         const float puff_size_mult = 2.f;  /* puffs 2x larger */
         const float start_alpha = 64.f;    /* 25% opacity */
 
-        /* Origin offsets: left -10x, -420y; right +250x, -620y; drift 1:1 */
-        const float origin_dx[STEAM_PUFFS] = { -10.f, 250.f };
-        const float origin_dy[STEAM_PUFFS] = { -420.f, -620.f };
+        /* Origin offsets: left -70x,-470y; right +290x,-660y */
+        const float origin_dx[STEAM_PUFFS] = { -70.f, 290.f };   /* left: 10 -x; right: 10 +x, 20 -y */
+        const float origin_dy[STEAM_PUFFS] = { -470.f, -660.f };
         const float drift_right_per_up = 1.0f;  /* 1 px right per 1 px up */
 
         if(!init){
@@ -705,10 +721,10 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
     {
         const float eye_left_fx = 0.38f, eye_left_fy = 0.22f;
         const float eye_right_fx = 0.62f, eye_right_fy = 0.22f;
-        const int eye_left_dy = 370;   /* left: 5px -y, 5px -x again */
-        const int eye_right_dy = 360; /* right: 5px -y, 5px -x again */
-        const int eye_left_dx = -45;
-        const int eye_right_dx = -920;
+        const int eye_left_dy = 366;   /* eyes: 4px -x, 4px -y */
+        const int eye_right_dy = 356;
+        const int eye_left_dx = -49;
+        const int eye_right_dx = -924;
         int eye_radius = clampi((int)(18*scale), 8, 36);
         int cx_left  = (int)((float)W * eye_left_fx + 0.5f) + eye_left_dx;
         int cy_left  = (int)(body_y + (float)(H - body_y) * eye_left_fy + 0.5f) + eye_left_dy;
@@ -728,8 +744,8 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
     fill_round_rect(r, hdr, clampi((int)(24*scale), 10, 40));
 
     /* Application name centered at top of header */
-    draw_text(r, f->h1, "Arrival Board", hdr.x + hdr.w / 2, hdr.y + clampi((int)(22*scale), 10, 36), white, 1);
-
+    int title_y = hdr.y + clampi((int)(22*scale), 10, 36);
+    draw_text(r, f->h1, "Arrival Board", hdr.x + hdr.w / 2, title_y, white, 1);
     char left1[256];
     if(stop_name && *stop_name) snprintf(left1, sizeof(left1), "%s", stop_name);
     else snprintf(left1, sizeof(left1), "Stop %s", stop_id ? stop_id : "--");
@@ -745,48 +761,57 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
     /* add a bit more vertical space between the two header text lines */
     draw_text(r, f->h2, left2, left_x, top_y + clampi((int)(78*scale), 44, 120), dim, 0);
 
+    /* Top right: date/time and weather+precip, same font size as stop number (h2) */
     int right_x = hdr.x + hdr.w - pad;
     time_t now = time(NULL);
     struct tm lt;
     localtime_r(&now, &lt);
     char ts[64];
     strftime(ts, sizeof(ts), "%a %b %-d  %-I:%M %p", &lt);
-    
-    /* Date/time: top of text touches top of header */
     int ts_h = 0;
     text_size(f->h2, ts, NULL, &ts_h);
-    draw_text(r, f->h2, ts, right_x, hdr.y, white, 2);
+    int right_line_gap = clampi((int)(12*scale), 6, 24);
+    draw_text(r, f->h2, ts, right_x, hdr.y + pad, white, 2);
 
     if(wx && wx->have){
-        char wline1[128];
-        snprintf(wline1, sizeof(wline1), "%s  %d°F", wx->icon, wx->temp_f);
-
-        char wline2[128];
-        if(wx->precip_prob >= 0) snprintf(wline2, sizeof(wline2), "Precip %d%%", wx->precip_prob);
-        else if(wx->precip_in >= 0) snprintf(wline2, sizeof(wline2), "Precip %.2f in", wx->precip_in);
-        else snprintf(wline2, sizeof(wline2), "Precip --");
-
-        /* Weather icon + temp: center vertically in header */
-        int wline1_h = 0;
-        text_size(f->h2, wline1, NULL, &wline1_h);
-        int weather_y = hdr.y + (header_h - wline1_h) / 2;
-        draw_text(r, f->h2, wline1, right_x, weather_y, white, 2);
-
-        /* Precipitation: bottom of text touches bottom of header */
-        int wline2_h = 0;
-        text_size(f->h2, wline2, NULL, &wline2_h);
-        int precip_y = hdr.y + header_h - wline2_h;
-        draw_text(r, f->h2, wline2, right_x, precip_y, dim, 2);
+        /* Weather + temp + precipitation on one line; same font size as date/time (h2) */
+        char wline[128];
+        if(wx->precip_prob >= 0)
+            snprintf(wline, sizeof(wline), "%s  %d°F   Precip %d%%", wx->icon, wx->temp_f, wx->precip_prob);
+        else if(wx->precip_in >= 0)
+            snprintf(wline, sizeof(wline), "%s  %d°F   Precip %.2f in", wx->icon, wx->temp_f, wx->precip_in);
+        else
+            snprintf(wline, sizeof(wline), "%s  %d°F   Precip --", wx->icon, wx->temp_f);
+        TTF_Font *wf = symbol_font ? symbol_font : f->h2;
+        draw_text(r, wf, wline, right_x, hdr.y + pad + ts_h + right_line_gap, white, 2);
     } else {
-        int wline_h = 0;
-        text_size(f->h2, "Weather --", NULL, &wline_h);
-        int weather_y = hdr.y + (header_h - wline_h) / 2;
-        draw_text(r, f->h2, "Weather --", right_x, weather_y, dim, 2);
+        draw_text(r, f->h2, "Weather --", right_x, hdr.y + pad + ts_h + right_line_gap, dim, 2);
     }
 
     body_y = hdr.y + hdr.h + pad;
     body_h = H - body_y - pad;
     if(body_h < 100) body_h = 100;
+
+    /* Logo (bottom left) and copyright (bottom center): above background, below tiles */
+    {
+        int bottom_pad = pad;
+        int logo_max_h = clampi((int)(280*scale), 120, 440);  /* 2x larger */
+        if(logo_tex){
+            int tw = 0, th = 0;
+            SDL_QueryTexture(logo_tex, NULL, NULL, &tw, &th);
+            if(tw > 0 && th > 0){
+                int dw = (int)((long)logo_max_h * (long)tw / (long)th);
+                if(dw > W - 2*bottom_pad) dw = W - 2*bottom_pad;
+                int dh = (int)((long)dw * (long)th / (long)tw);
+                SDL_Rect logo_dst = { bottom_pad, H - bottom_pad - dh, dw, dh };
+                SDL_RenderCopy(r, logo_tex, NULL, &logo_dst);
+            }
+        }
+        static const char copy_str[] = "\xC2\xA9 2026 Damon";  /* © 2026 Damon */
+        int cw = 0, ch = 0;
+        text_size(f->tile_small, copy_str, &cw, &ch);
+        draw_text(r, f->tile_small, copy_str, W / 2, H - bottom_pad - ch / 2, dim, 1);
+    }
 
     if(n <= 0){
         draw_text(r, f->h1, "No upcoming buses", W/2, body_y + body_h/2, white, 1);
@@ -886,6 +911,7 @@ int main(int argc, char **argv){
     /* Load background image (under the tiles). Path: env BACKGROUND_IMAGE or "Steampunk bus image.png" in cwd. */
     SDL_Texture *bg_tex = NULL;
     SDL_Texture *steam_tex = NULL;
+    SDL_Texture *logo_tex = NULL;
 #ifdef USE_SDL_IMAGE
     const char *bg_path = getenv("BACKGROUND_IMAGE");
     if(!bg_path || !*bg_path) bg_path = "Steampunk bus image.png";
@@ -958,6 +984,26 @@ int main(int argc, char **argv){
             }
         }
     }
+    /* Logo at bottom left: Damon Logo Large.png */
+    {
+        const char *logo_path = "Damon Logo Large.png";
+        SDL_Surface *logo_surf = IMG_Load(logo_path);
+        if(!logo_surf && getenv("HOME")){
+            char alt[512];
+            snprintf(alt, sizeof(alt), "%s/arrival_board/Damon Logo Large.png", getenv("HOME"));
+            logo_surf = IMG_Load(alt);
+        }
+        if(logo_surf){
+            logo_tex = SDL_CreateTextureFromSurface(r, logo_surf);
+            SDL_FreeSurface(logo_surf);
+            if(logo_tex){
+                SDL_SetTextureBlendMode(logo_tex, SDL_BLENDMODE_BLEND);
+                logf_("Logo loaded: Damon Logo Large.png");
+            }
+        } else {
+            logf_("Logo not found: %s", IMG_GetError());
+        }
+    }
 #endif
 
     Fonts fonts;
@@ -967,6 +1013,30 @@ int main(int argc, char **argv){
         SDL_DestroyWindow(win);
         TTF_Quit(); SDL_Quit();
         return 1;
+    }
+
+    /* Symbol font for weather icon (Unicode ☀☁⛅ etc.); try several paths on Pi */
+    const char *symbol_font_path = getenv("SYMBOL_FONT_PATH");
+    if(!symbol_font_path || !*symbol_font_path) symbol_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+    float sym_scale = (H > 0) ? ((float)H / 2160.0f) : 1.0f;
+    int sym_pt = clampi((int)(58.f * sym_scale), 26, 120);
+    TTF_Font *symbol_font = TTF_OpenFont(symbol_font_path, sym_pt);
+    const char *loaded_symbol_path = symbol_font ? symbol_font_path : NULL;
+    if(!symbol_font){
+        const char *fallbacks[] = {
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+            NULL
+        };
+        for(int i = 0; fallbacks[i] && !symbol_font; i++){
+            symbol_font = TTF_OpenFont(fallbacks[i], sym_pt);
+            if(symbol_font) loaded_symbol_path = fallbacks[i];
+        }
+    }
+    if(symbol_font){
+        logf_("Symbol font loaded: %s (pt %d) for weather icon", loaded_symbol_path, sym_pt);
+    } else {
+        logf_("Symbol font failed (weather icon may show tofu): %s - %s", symbol_font_path, TTF_GetError());
     }
 
     Weather wx;
@@ -1002,7 +1072,7 @@ int main(int argc, char **argv){
         }
 
         SDL_GetRendererOutputSize(r, &W, &H);
-        render_ui(r, &fonts, W, H, stop_id ? stop_id : "--", stop_name, &wx, arrivals, n, bg_tex, steam_tex);
+        render_ui(r, &fonts, W, H, stop_id ? stop_id : "--", stop_name, &wx, arrivals, n, bg_tex, steam_tex, logo_tex, symbol_font);
 
         SDL_Delay(80);
     }
@@ -1010,6 +1080,8 @@ int main(int argc, char **argv){
 done:
     if(bg_tex) SDL_DestroyTexture(bg_tex);
     if(steam_tex) SDL_DestroyTexture(steam_tex);
+    if(logo_tex) SDL_DestroyTexture(logo_tex);
+    if(symbol_font) TTF_CloseFont(symbol_font);
     tile_free_fonts(&fonts);
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(win);
