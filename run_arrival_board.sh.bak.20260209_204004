@@ -1,0 +1,38 @@
+#!/bin/bash
+set -u
+exec >>"$HOME/arrival_board/boot.log" 2>&1
+set -x
+
+cd "$HOME/arrival_board" || exit 1
+
+# Ensure plenty of file descriptors (harmless if already high)
+ulimit -n "${ULIMIT_NOFILE:-16384}" || true
+
+# Print one header into the log each launch
+echo "=== run_arrival_board.sh ==="
+date
+echo "PWD=$(pwd)"
+echo "USER=$(id -un) UID=$(id -u) ULIMIT_NOFILE=$(ulimit -n)"
+echo "ENV: SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-<unset>} SDL_RENDER_DRIVER=${SDL_RENDER_DRIVER:-<unset>}"
+echo "CFG: STOP_ID=${STOP_ID:-<unset>} ROUTE_FILTER=${ROUTE_FILTER:-} POLL_SECONDS=${POLL_SECONDS:-10}"
+
+# Never exit: if build fails or arrival_board exits, wait and retry.
+while true; do
+  echo "--- build ---"
+  if ! make clean; then
+    echo "make clean failed; retrying in 2s"
+    sleep 2
+    continue
+  fi
+  if ! make -j; then
+    echo "build failed; retrying in 2s"
+    sleep 2
+    continue
+  fi
+
+  echo "--- run ---"
+  ./arrival_board
+  rc=$?
+  echo "arrival_board exited rc=$rc at $(date); restarting in 2s"
+  sleep 2
+done

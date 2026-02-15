@@ -1,267 +1,145 @@
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_ttf.h>
-#include <stdbool.h>
+#include "tile.h"
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
-#include <stdint.h>
+#include <stdlib.h>
 
-static void fill_rect(SDL_Renderer *ren, SDL_Rect r, SDL_Color c){
-  SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
-  SDL_RenderFillRect(ren, &r);
+static int clampi(int v, int lo, int hi){ return (v<lo)?lo:(v>hi)?hi:v; }
+
+static SDL_Texture* tex_from_text(SDL_Renderer *r, TTF_Font *font, const char *utf8, SDL_Color c,
+                                  int *outw, int *outh) {
+    if(!utf8) utf8 = "";
+    SDL_Surface *s = TTF_RenderUTF8_Blended(font, utf8, c);
+    if(!s) return NULL;
+    SDL_Texture *t = SDL_CreateTextureFromSurface(r, s);
+    if(outw) *outw = s->w;
+    if(outh) *outh = s->h;
+    SDL_FreeSurface(s);
+    return t;
 }
 
-static void draw_rect(SDL_Renderer *ren, SDL_Rect r, SDL_Color c){
-  SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
-  SDL_RenderDrawRect(ren, &r);
-}
+int tile_load_fonts(Fonts *f, const char *font_path, int screen_h) {
+    if(!f) return -1;
+    memset(f, 0, sizeof(*f));
 
-static void draw_text_scaled(SDL_Renderer *ren, TTF_Font *font, SDL_Color col,
-                             int x, int y, float scale, const char *s){
-  if (!ren || !font || !s || !*s) return;
-  if (scale <= 0.01f) scale = 1.0f;
+    float scale = (screen_h > 0) ? ((float)screen_h / 2160.0f) : 1.0f;
 
-  SDL_Surface *surf = TTF_RenderUTF8_Blended(font, s, col);
-  if (!surf) return;
+    float user = 1.30f;
+    const char *fs = getenv("FONT_SCALE");
+    if(fs && *fs){
+        float v = (float)atof(fs);
+        if(v > 0.50f && v < 3.00f) user = v;
+    }
+    scale *= user;
 
-  SDL_Texture *tex = SDL_CreateTextureFromSurface(ren, surf);
-  if (!tex) { SDL_FreeSurface(surf); return; }
+    int h1 = (int)(86 * scale);
+    int h2 = (int)(58 * scale);
+    int tb = (int)(92 * scale);
+    int tm = (int)(60 * scale);
+    int ts = (int)(46 * scale);
 
-  int w = (int)lroundf((float)surf->w * scale);
-  int h = (int)lroundf((float)surf->h * scale);
-  SDL_Rect r = { x, y, w, h };
+    h1 = clampi(h1, 34, 160);
+    h2 = clampi(h2, 26, 120);
+    tb = clampi(tb, 30, 170);
+    tm = clampi(tm, 22, 130);
+    ts = clampi(ts, 18, 100);
 
-  SDL_FreeSurface(surf);
-  SDL_RenderCopy(ren, tex, NULL, &r);
-  SDL_DestroyTexture(tex);
-}
+    f->h1 = TTF_OpenFont(font_path, h1);
+    f->h2 = TTF_OpenFont(font_path, h2);
+    f->tile_big   = TTF_OpenFont(font_path, tb);
+    f->tile_med   = TTF_OpenFont(font_path, tm);
+    f->tile_small = TTF_OpenFont(font_path, ts);
 
-static void draw_text(SDL_Renderer *ren, TTF_Font *font, SDL_Color col,
-                      int x, int y, const char *s){
-  draw_text_scaled(ren, font, col, x, y, 1.0f, s);
-}
-
-static void draw_text_right_scaled(SDL_Renderer *ren, TTF_Font *font, SDL_Color col,
-                                   int right_x, int y, float scale, const char *s){
-  if (!ren || !font || !s || !*s) return;
-  int w=0,h=0;
-  if (TTF_SizeUTF8(font, s, &w, &h) != 0) return;
-  int sw = (int)lroundf((float)w * scale);
-  draw_text_scaled(ren, font, col, right_x - sw, y, scale, s);
-}
-
-static void draw_text_right(SDL_Renderer *ren, TTF_Font *font, SDL_Color col,
-                            int right_x, int y, const char *s){
-  draw_text_right_scaled(ren, font, col, right_x, y, 1.0f, s);
-}
-
-static void ellipsize_to_width(TTF_Font *font, const char *in, int max_w, char *out, size_t outsz){
-  if (!out || outsz == 0) return;
-  out[0] = '\0';
-  if (!in || !*in) return;
-
-  int w=0,h=0;
-  if (TTF_SizeUTF8(font, in, &w, &h) == 0 && w <= max_w) {
-    snprintf(out, outsz, "%s", in);
-    return;
-  }
-
-  const char *ellipsis = "…";
-  char tmp[512];
-  tmp[0] = '\0';
-
-  size_t n = strlen(in);
-  size_t k = 0;
-  while (k < n && k < sizeof(tmp)-8) {
-    tmp[k] = in[k];
-    tmp[k+1] = '\0';
-
-    char t2[520];
-    snprintf(t2, sizeof(t2), "%s%s", tmp, ellipsis);
-
-    if (TTF_SizeUTF8(font, t2, &w, &h) == 0 && w <= max_w) {
-      k++;
-      continue;
+    if(!f->h1 || !f->h2 || !f->tile_big || !f->tile_med || !f->tile_small) {
+        return -1;
     }
 
-    if (k == 0) {
-      snprintf(out, outsz, "%s", ellipsis);
-      return;
+    TTF_SetFontHinting(f->h1, TTF_HINTING_LIGHT);
+    TTF_SetFontHinting(f->h2, TTF_HINTING_LIGHT);
+    TTF_SetFontHinting(f->tile_big, TTF_HINTING_LIGHT);
+    TTF_SetFontHinting(f->tile_med, TTF_HINTING_LIGHT);
+    TTF_SetFontHinting(f->tile_small, TTF_HINTING_LIGHT);
+    return 0;
+}
+
+void tile_free_fonts(Fonts *f){
+    if(!f) return;
+    if(f->h1) TTF_CloseFont(f->h1);
+    if(f->h2) TTF_CloseFont(f->h2);
+    if(f->tile_big) TTF_CloseFont(f->tile_big);
+    if(f->tile_med) TTF_CloseFont(f->tile_med);
+    if(f->tile_small) TTF_CloseFont(f->tile_small);
+    memset(f, 0, sizeof(*f));
+}
+
+void text_size(TTF_Font *font, const char *utf8, int *out_w, int *out_h) {
+    if(!utf8) utf8 = "";
+    int w = 0, h = 0;
+    if(TTF_SizeUTF8(font, utf8, &w, &h) == 0) {
+        if(out_w) *out_w = w;
+        if(out_h) *out_h = h;
     }
-    tmp[k] = '\0';
-    snprintf(out, outsz, "%s%s", tmp, ellipsis);
-    return;
-  }
-
-  snprintf(out, outsz, "%s", ellipsis);
 }
 
-static bool is_no_destination(const char *dest){
-  if (!dest) return true;
-  while (*dest == ' ' || *dest == '\t') dest++;
-  if (!*dest) return true;
-  return (strcmp(dest, "(no destination)") == 0);
+void draw_text(SDL_Renderer *r, TTF_Font *font, const char *utf8,
+               int x, int y, SDL_Color c, int align) {
+    int tw=0, th=0;
+    SDL_Texture *t = tex_from_text(r, font, utf8, c, &tw, &th);
+    if(!t) return;
+
+    SDL_Rect dst = { x, y, tw, th };
+    if(align == 1) dst.x = x - tw/2;
+    if(align == 2) dst.x = x - tw;
+
+    SDL_RenderCopy(r, t, NULL, &dst);
+    SDL_DestroyTexture(t);
 }
 
-static void append_sep(char *dst, size_t dstsz, const char *sep, const char *s){
-  /* defensive: avoid crashes if a caller passes a bogus pointer (seen: 0x1) */
-  if (!dst || dstsz == 0 || !s) return;
-  if ((uintptr_t)s < 4096) return;
-  if (!*s) return;
-  if (!sep) sep = " ";
+void draw_text_trunc(SDL_Renderer *r, TTF_Font *font, const char *utf8,
+                     int x, int y, int max_w, SDL_Color c, int align) {
+    if(!utf8) utf8 = "";
+    char buf[512];
+    snprintf(buf, sizeof(buf), "%s", utf8);
 
-  if (!dst || dstsz == 0 || !s) return;
-  if ((uintptr_t)s < 4096) return;  // guard against invalid tiny pointers
-  if (!*s) return;
-  if (dst[0]) strncat(dst, sep, dstsz - strlen(dst) - 1);
-  strncat(dst, s, dstsz - strlen(dst) - 1);
-}
-
-void render_tile(SDL_Renderer *ren,
-                 TTF_Font *font_route,
-                 TTF_Font *font_dest,
-                 TTF_Font *font_eta,
-                 TTF_Font *font_small,
-                 SDL_Rect r,
-                 const char *route_short,
-                 SDL_Color route_color,
-                 const char *dest,
-                 const char *eta_big,
-                 const char *eta_suffix,
-                 const char *dist_line,
-                 bool realtime)
-{
-  SDL_Color bg     = { 28, 30, 38, 255 };
-  SDL_Color border = { 70, 80, 100, 255 };
-  SDL_Color text   = { 235, 238, 245, 255 };
-  SDL_Color muted  = { 180, 190, 205, 255 };
-
-  if (!realtime) {
-    bg.r = 26; bg.g = 28; bg.b = 34;
-    muted.r = 170; muted.g = 175; muted.b = 190;
-  }
-
-  fill_rect(ren, r, bg);
-  draw_rect(ren, r, border);
-
-  int pad = (r.w > 1400) ? 28 : 14;
-  int xL = r.x + pad;
-  int xR = r.x + r.w - pad;
-
-  // --- scaling knobs (no font rebuild needed) ---
-  float s_route = (r.w > 1400) ? 1.12f : 1.00f;
-  float s_dest  = (r.w > 1400) ? 1.08f : 1.00f;
-  float s_small = (r.w > 1400) ? 1.08f : 1.00f;
-
-  // Move the top line down a bit for readability
-  int yTop = r.y + pad + ((r.w > 1400) ? 10 : 6);
-
-  // Measure ETA block so left text doesn't run under it
-  int eta_w=0, eta_h=0;
-  if (eta_big && *eta_big) {
-    (void)TTF_SizeUTF8(font_eta, eta_big, &eta_w, &eta_h);
-  }
-  int reserve_right = (eta_w > 0) ? (eta_w + 44) : 0;   // gap between left text and ETA
-  int xLeftMax = xR - reserve_right;
-
-  // --- Draw ETA digits (top-right) ---
-  int eta_y = yTop - ((r.w > 1400) ? 6 : 4);
-  if (eta_big && *eta_big) {
-    draw_text_right(ren, font_eta, text, xR, eta_y, eta_big);
-
-    // Place suffix UNDER the digits and a bit DOWN so it never overlaps.
-    if (eta_suffix && *eta_suffix) {
-      int suf_w=0, suf_h=0;
-      if (TTF_SizeUTF8(font_small, eta_suffix, &suf_w, &suf_h) == 0) {
-        // left edge of the big digits:
-        int digits_left = xR - eta_w;
-        // center suffix under digits:
-        int suf_x = digits_left + (eta_w/2) - (suf_w/2);
-        // and put it below digits:
-        int suf_y = eta_y + eta_h + 4;
-
-        // Clamp so it stays inside tile
-        int max_suf_y = r.y + r.h - pad - (int)lroundf((float)suf_h * s_small);
-        if (suf_y > max_suf_y) suf_y = max_suf_y;
-
-        draw_text_scaled(ren, font_small, muted, suf_x, suf_y, s_small, eta_suffix);
-      }
+    int w=0, h=0;
+    if(TTF_SizeUTF8(font, buf, &w, &h) == 0 && w <= max_w) {
+        draw_text(r, font, buf, x, y, c, align);
+        return;
     }
-  }
 
-  // --- Top line: Route + " - " + Destination (same row) ---
-  int route_w=0, route_h=0;
-  if (route_short && *route_short) {
-    (void)TTF_SizeUTF8(font_route, route_short, &route_w, &route_h);
-    int route_w_s = (int)lroundf((float)route_w * s_route);
-    draw_text_scaled(ren, font_route, route_color, xL, yTop, s_route, route_short);
-
-    // Destination after dash (if real)
-    if (dest && *dest && !is_no_destination(dest)) {
-      const char *dash = " - ";
-      int dash_w=0, dash_h=0;
-      (void)TTF_SizeUTF8(font_dest, dash, &dash_w, &dash_h);
-
-      int dash_w_s = (int)lroundf((float)dash_w * s_dest);
-      int dest_start_x = xL + route_w_s;
-
-      // only draw if we have room
-      if (dest_start_x + dash_w_s + 10 < xLeftMax) {
-        draw_text_scaled(ren, font_dest, text, dest_start_x, yTop, s_dest, dash);
-
-        int dest_x = dest_start_x + dash_w_s;
-        int dest_max_w_px = xLeftMax - dest_x;
-        if (dest_max_w_px < 10) dest_max_w_px = 10;
-
-        // ellipsize based on unscaled width
-        int max_unscaled = (int)lroundf((float)dest_max_w_px / s_dest);
-        char dest_fit[256];
-        ellipsize_to_width(font_dest, dest, max_unscaled, dest_fit, sizeof(dest_fit));
-        if (dest_fit[0]) {
-          draw_text_scaled(ren, font_dest, text, dest_x, yTop, s_dest, dest_fit);
+    const char *ellipsis = "…";
+    size_t n = strlen(buf);
+    while(n > 0) {
+        buf[n-1] = '\0';
+        char tmp[520];
+        snprintf(tmp, sizeof(tmp), "%s%s", buf, ellipsis);
+        if(TTF_SizeUTF8(font, tmp, &w, &h) == 0 && w <= max_w) {
+            draw_text(r, font, tmp, x, y, c, align);
+            return;
         }
-      }
+        n--;
     }
-  } else {
-    // No route short: just draw destination if meaningful
-    if (dest && *dest && !is_no_destination(dest)) {
-      int dest_max_w_px = xLeftMax - xL;
-      int max_unscaled = (int)lroundf((float)dest_max_w_px / s_dest);
-      char dest_fit[256];
-      ellipsize_to_width(font_dest, dest, max_unscaled, dest_fit, sizeof(dest_fit));
-      if (dest_fit[0]) draw_text_scaled(ren, font_dest, text, xL, yTop, s_dest, dest_fit);
+    draw_text(r, font, ellipsis, x, y, c, align);
+}
+
+/* Simple rounded-rect fill via scanlines */
+void fill_round_rect(SDL_Renderer *r, SDL_Rect rc, int radius){
+    if(radius <= 0){
+        SDL_RenderFillRect(r, &rc);
+        return;
     }
-  }
-
-  // --- Bottom line: stops/distance, then bus info (and pax if caller included it) ---
-  char bottom[512];
-  bottom[0] = '\0';
-  append_sep(bottom, sizeof(bottom), " • ", dist_line);
-
-  // Put bus info after distance using dot separator (caller can include pax after bus too)
-  // Example desired: "2 stops • 0.5 mi • Bus 8838 • 23 pax"
-
-  if (bottom[0]) {
-    int bot_w=0, bot_h=0;
-    if (TTF_SizeUTF8(font_small, bottom, &bot_w, &bot_h) == 0) {
-      int bot_h_s = (int)lroundf((float)bot_h * s_small);
-
-      // Anchor safely above tile bottom
-      int yBot = r.y + r.h - pad - bot_h_s;
-
-      // Ensure it doesn't collide with the ETA suffix area
-      // (very conservative: keep at least 10px gap from suffix baseline area)
-      int minBot = eta_y + eta_h + 10 + bot_h_s;
-      if (yBot < minBot) yBot = minBot;
-      if (yBot > r.y + r.h - pad - bot_h_s) yBot = r.y + r.h - pad - bot_h_s;
-
-      // Ellipsize to tile width
-      int max_px = xR - xL;
-      int max_unscaled = (int)lroundf((float)max_px / s_small);
-      char bottom_fit[512];
-      ellipsize_to_width(font_small, bottom, max_unscaled, bottom_fit, sizeof(bottom_fit));
-
-      draw_text_scaled(ren, font_small, muted, xL, yBot, s_small, bottom_fit);
+    radius = clampi(radius, 1, (rc.w < rc.h ? rc.w/2 : rc.h/2));
+    for(int y=0; y<rc.h; y++){
+        int dy_top = radius - y;
+        int dy_bot = y - (rc.h - radius - 1);
+        int dx = 0;
+        if(dy_top > 0){
+            int yy = dy_top;
+            dx = (int)(radius - SDL_sqrtf((float)(radius*radius - yy*yy)));
+        } else if(dy_bot > 0){
+            int yy = dy_bot;
+            dx = (int)(radius - SDL_sqrtf((float)(radius*radius - yy*yy)));
+        }
+        SDL_Rect line = { rc.x + dx, rc.y + y, rc.w - 2*dx, 1 };
+        SDL_RenderFillRect(r, &line);
     }
-  }
 }

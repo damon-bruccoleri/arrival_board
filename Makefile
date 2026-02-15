@@ -1,23 +1,31 @@
-CC=gcc
+CC=cc
 
-CFLAGS=-D_GNU_SOURCE -O0 -g3 -fno-omit-frame-pointer -Wall -Wextra -std=c11 \
-  -I/usr/include/SDL2 -D_REENTRANT \
-  -I/usr/include/harfbuzz -I/usr/include/freetype2 -I/usr/include/libpng16 \
-  -I/usr/include/glib-2.0 -I/usr/lib/aarch64-linux-gnu/glib-2.0/include \
-  -I/usr/include/aarch64-linux-gnu -I/usr/include/cjson
+SDL_CFLAGS := $(shell sdl2-config --cflags 2>/dev/null || echo -I/usr/include/SDL2 -D_REENTRANT)
+SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null || echo -lSDL2)
 
-LDFLAGS=-rdynamic 
-LDLIBS=-lSDL2_ttf -lSDL2 -lcurl -lcjson -lm
+CFLAGS = -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE $(SDL_CFLAGS)
+LDFLAGS =
+LIBS = $(SDL_LIBS) -lSDL2_ttf -lcjson -lm
+# Optional: make USE_SDL_IMAGE=1 to enable Steampunk bus background (requires libsdl2-image-dev)
+ifneq ($(USE_SDL_IMAGE),)
+CFLAGS += -DUSE_SDL_IMAGE
+LIBS += -lSDL2_image
+endif
 
-OBJS=main.o video.o header.o tile.o
+OBJS = main.o tile.o
 
 all: arrival_board
 
 arrival_board: $(OBJS)
-	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LDLIBS)
+	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
-%.o: %.c
-	$(CC) $(CFLAGS) -c $< -o $@
+main.o: main.c tile.h
+	$(CC) $(CFLAGS) -c -o $@ main.c
+
+tile.o: tile.c tile.h
+	$(CC) $(CFLAGS) -c -o $@ tile.c
 
 clean:
-	rm -f arrival_board $(OBJS)
+	rm -f $(OBJS) arrival_board
+
+.PHONY: all clean
