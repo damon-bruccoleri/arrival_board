@@ -22,3 +22,6 @@ void draw_text_trunc(SDL_Renderer *r, TTF_Font *font, const char *utf8,
                      int x, int y, int max_w, SDL_Color c, int align);
 
 void fill_round_rect(SDL_Renderer *r, SDL_Rect rc, int radius);
+
+/* Filled circle at (cx, cy) with given radius; for overlays (e.g. robot eyes). */
+void draw_filled_circle(SDL_Renderer *r, int cx, int cy, int radius, SDL_Color c);

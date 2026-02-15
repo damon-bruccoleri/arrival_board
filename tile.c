@@ -1,9 +1,9 @@
 #include "tile.h"
+#include "util.h"
+#include <math.h>
 #include <stdio.h>
-#include <string.h>
 #include <stdlib.h>
-
-static int clampi(int v, int lo, int hi){ return (v<lo)?lo:(v>hi)?hi:v; }
+#include <string.h>
 
 static SDL_Texture* tex_from_text(SDL_Renderer *r, TTF_Font *font, const char *utf8, SDL_Color c,
                                   int *outw, int *outh) {
@@ -140,6 +140,18 @@ void fill_round_rect(SDL_Renderer *r, SDL_Rect rc, int radius){
             dx = (int)(radius - SDL_sqrtf((float)(radius*radius - yy*yy)));
         }
         SDL_Rect line = { rc.x + dx, rc.y + y, rc.w - 2*dx, 1 };
+        SDL_RenderFillRect(r, &line);
+    }
+}
+
+void draw_filled_circle(SDL_Renderer *r, int cx, int cy, int radius, SDL_Color c) {
+    if (radius <= 0) return;
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a);
+    for (int y = -radius; y <= radius; y++) {
+        int dx = (int)(sqrtf((float)(radius * radius - y * y)) + 0.5f);
+        if (dx < 0) continue;
+        SDL_Rect line = { cx - dx, cy + y, 2 * dx, 1 };
         SDL_RenderFillRect(r, &line);
     }
 }
