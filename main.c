@@ -535,6 +535,19 @@ typedef struct SteamPuff {
     float rise;
 } SteamPuff;
 
+/* Filled circle (for robot eyes). cx,cy in screen coords; radius in pixels. */
+static void draw_filled_circle(SDL_Renderer *r, int cx, int cy, int radius, SDL_Color c){
+    if(radius <= 0) return;
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(r, c.r, c.g, c.b, c.a);
+    for(int y = -radius; y <= radius; y++){
+        int dx = (int)(sqrtf((float)(radius*radius - y*y)) + 0.5f);
+        if(dx < 0) continue;
+        SDL_Rect line = { cx - dx, cy + y, 2*dx, 1 };
+        SDL_RenderFillRect(r, &line);
+    }
+}
+
 /* Draw one tile's content (background + text) into rect. Used for both normal draw and flip texture. */
 static void draw_tile_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
                               SDL_Rect rect, float scale,
@@ -686,6 +699,28 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
                 SDL_RenderCopy(r, steam_tex, NULL, &dst);
             }
         }
+    }
+
+    /* Robot eyes: two pulsing cyan circles; offsets to align with face in image. */
+    {
+        const float eye_left_fx = 0.38f, eye_left_fy = 0.22f;
+        const float eye_right_fx = 0.62f, eye_right_fy = 0.22f;
+        const int eye_left_dy = 370;   /* left: 5px -y, 5px -x again */
+        const int eye_right_dy = 360; /* right: 5px -y, 5px -x again */
+        const int eye_left_dx = -45;
+        const int eye_right_dx = -920;
+        int eye_radius = clampi((int)(18*scale), 8, 36);
+        int cx_left  = (int)((float)W * eye_left_fx + 0.5f) + eye_left_dx;
+        int cy_left  = (int)(body_y + (float)(H - body_y) * eye_left_fy + 0.5f) + eye_left_dy;
+        int cx_right = (int)((float)W * eye_right_fx + 0.5f) + eye_right_dx;
+        int cy_right = (int)(body_y + (float)(H - body_y) * eye_right_fy + 0.5f) + eye_right_dy;
+        float t = (float)SDL_GetTicks() * 0.001f;
+        float pulse = 0.5f + 0.5f * sinf(t * 6.283185f * 2.2f);  /* smooth, ~2.2 Hz */
+        int alpha = 140 + (int)(100.f * pulse);
+        if(alpha > 255) alpha = 255;
+        SDL_Color cyan = { 0, 200, 255, (Uint8)alpha };
+        draw_filled_circle(r, cx_left,  cy_left,  eye_radius, cyan);
+        draw_filled_circle(r, cx_right, cy_right, eye_radius, cyan);
     }
 
     SDL_Rect hdr = { pad, pad, W - 2*pad, header_h };
