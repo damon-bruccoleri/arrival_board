@@ -67,7 +67,8 @@ void render_header(SDL_Renderer *ren,
   draw_text(ren, font_title, title, xL, y, line1);
 
   // Move date/time & stop number DOWN and make larger (font_sub).
-  y += TTF_FontHeight(font_title) + 14;
+  // Slightly increase spacing between the first and second header lines.
+  y += TTF_FontHeight(font_title) + 20;
 
   char line2[256];
   if (datetime_line && *datetime_line && stop_id && *stop_id) {
@@ -80,7 +81,8 @@ void render_header(SDL_Renderer *ren,
   draw_text(ren, font_sub, sub, xL, y, line2);
 
   // Weather line: one more step down, same larger font_sub.
-  y += TTF_FontHeight(font_sub) + 10;
+  // Give a little extra breathing room here as well.
+  y += TTF_FontHeight(font_sub) + 16;
   if (weather_line && *weather_line) {
     draw_text(ren, font_sub, sub, xL, y, weather_line);
   } else {
