@@ -12,6 +12,72 @@
 #include <string.h>
 #include <time.h>
 
+/* --- Passenger extraction (safe, optional) ---
+   Anchor on "VehicleRef":"<vehicle>" then search forward in that stop-visit window
+   for "EstimatedPassengerCount": N
+*/
+static const char* ab_strnstr(const char* hay, size_t haylen, const char* needle) {
+  if (!hay || !needle) return NULL;
+  size_t nlen = 0; for (const char* p = needle; *p; ++p) nlen++;
+  if (nlen == 0 || haylen < nlen) return NULL;
+  for (size_t i = 0; i + nlen <= haylen; ++i) {
+    size_t j = 0;
+    for (; j < nlen; ++j) if (hay[i + j] != needle[j]) break;
+    if (j == nlen) return hay + i;
+  }
+  return NULL;
+}
+
+static int ab_parse_int(const char* p, const char* end, int* out) {
+  if (!p || !end || p >= end || !out) return 0;
+  while (p < end && (*p==' '||*p=='\t'||*p=='\r'||*p=='\n'||*p==':')) p++;
+  int sign = 1;
+  if (p < end && *p == '-') { sign = -1; p++; }
+  if (p >= end || *p < '0' || *p > '9') return 0;
+  long v = 0;
+  while (p < end && *p >= '0' && *p <= '9') { v = v*10 + (*p - '0'); p++; }
+  *out = (int)(v * sign);
+  return 1;
+}
+
+static void ab_fill_pax_text_for_vehicle(const char* json, const char* vehicle_ref,
+                                        char* out, size_t outsz) {
+  if (!out || outsz == 0) return;
+  out[0] = '\0';
+  if (!json || !vehicle_ref || !*vehicle_ref) return;
+
+  char needle[256];
+  int nw = snprintf(needle, sizeof(needle), "\"VehicleRef\":\"%s\"", vehicle_ref);
+  if (nw <= 0 || (size_t)nw >= sizeof(needle)) return;
+
+  const char* hit = strstr(json, needle);
+  if (!hit) return;
+
+  const char* p = hit;
+  const char* next1 = strstr(p + 1, "\"MonitoredStopVisit\"");
+  const char* next2 = strstr(p + 1, "\"VehicleRef\"");
+  const char* end = NULL;
+  if (next1 && next2) end = (next1 < next2) ? next1 : next2;
+  else end = next1 ? next1 : next2;
+  if (!end) end = p + 8000;
+  if (end < p) return;
+
+  size_t win = (size_t)(end - p);
+  const char* key = "\"EstimatedPassengerCount\"";
+  const char* k = ab_strnstr(p, win, key);
+  if (!k) return;
+
+  const char* colon = k;
+  while (colon < end && *colon != ':') colon++;
+  if (colon >= end) return;
+
+  int count = -1;
+  if (!ab_parse_int(colon + 1, end, &count)) return;
+  if (count < 0) return;
+
+  snprintf(out, outsz, "%d pax", count);
+}
+
 typedef struct {
   SDL_Window   *win;
   SDL_Renderer *ren;
@@ -54,11 +120,16 @@ typedef struct {
   char route_short[32];
   char dest[192];
   char vehicle[64];
-  int  stops_away;
+  
+  char pax_text[24];  /* "13 pax" or empty */
+int  stops_away;
   int  dist_meters;
   time_t arrival_epoch;
   bool realtime;
+  int pax;      // optional; 0 means unknown
+  int pax_cap;  // optional; 0 means unknown
 } Arrival;
+
 
 typedef struct {
   char *p;
@@ -300,6 +371,18 @@ static int parse_mta_arrivals(const char *json_txt, Arrival *out, int outcap,
       route_short_from(lineRef, pub0, A->route_short, sizeof(A->route_short));
       safe_snprintf(A->dest, sizeof(A->dest), "%s", (dest0 && *dest0) ? dest0 : "(no destination)");
       safe_snprintf(A->vehicle, sizeof(A->vehicle), "%s", (veh && *veh) ? veh : "");
+
+// --- optional passenger load fields (safe; may be missing) ---
+A->pax = 0;
+A->pax_cap = 0;
+cJSON *call = cJSON_GetObjectItemCaseSensitive(mj, "MonitoredCall");
+cJSON *ext  = call ? cJSON_GetObjectItemCaseSensitive(call, "Extensions") : NULL;
+cJSON *caps = ext  ? cJSON_GetObjectItemCaseSensitive(ext,  "Capacities") : NULL;
+cJSON *pc   = caps ? cJSON_GetObjectItemCaseSensitive(caps, "EstimatedPassengerCount") : NULL;
+cJSON *cap  = caps ? cJSON_GetObjectItemCaseSensitive(caps, "EstimatedPassengerCapacity") : NULL;
+if (pc && cJSON_IsNumber(pc))  A->pax = pc->valueint;
+if (cap && cJSON_IsNumber(cap)) A->pax_cap = cap->valueint;
+
       A->stops_away = mc ? jint(mc, "NumberOfStopsAway", -1) : -1;
       A->dist_meters = mc ? jint(mc, "DistanceFromStop", -1) : -1;
       A->arrival_epoch = parse_iso8601(t_use);
@@ -444,10 +527,10 @@ static void fetch_weather_line(char *out, size_t outsz){
 
   const char *icon = wx_icon_from_code((day_code >= 0) ? day_code : cur_code);
   if (pop >= 30) {
-    safe_snprintf(out, outsz, "%s  Oakland Gardens: %d°F now  •  %d/%d°F today  •  Rain %d%%",
+    safe_snprintf(out, outsz, "%s  Oakland Gardens: %d°F now  •  %d/%d°F today  •  Precipitation %d%%",
                   icon, cur_temp, day_hi, day_lo, pop);
   } else if (pop >= 0) {
-    safe_snprintf(out, outsz, "%s  Oakland Gardens: %d°F now  •  %d/%d°F today  •  Rain unlikely (%d%%)",
+    safe_snprintf(out, outsz, "%s  Oakland Gardens: %d°F now  •  %d/%d°F today  •  Precipitation unlikely (%d%%)",
                   icon, cur_temp, day_hi, day_lo, pop);
   } else {
     safe_snprintf(out, outsz, "%s  Oakland Gardens: %d°F now  •  %d/%d°F today",

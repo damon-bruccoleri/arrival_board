@@ -104,6 +104,12 @@ static bool is_no_destination(const char *dest){
 }
 
 static void append_sep(char *dst, size_t dstsz, const char *sep, const char *s){
+  /* defensive: avoid crashes if a caller passes a bogus pointer (seen: 0x1) */
+  if (!dst || dstsz == 0 || !s) return;
+  if ((uintptr_t)s < 4096) return;
+  if (!*s) return;
+  if (!sep) sep = " ";
+
   if (!dst || dstsz == 0 || !s) return;
   if ((uintptr_t)s < 4096) return;  // guard against invalid tiny pointers
   if (!*s) return;
