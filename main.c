@@ -1,5 +1,10 @@
 #include "tile.h"
 #include <cjson/cJSON.h>
+#ifdef USE_SDL_IMAGE
+#include <SDL2/SDL_image.h>
+#endif
+
+#define LAYOUT_VER "2"   /* ROUTE - DESTINATION line 1; bus # only on line 2 */
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
@@ -403,19 +408,27 @@ static int fetch_mta_arrivals(Arrival *arr, int max_arr,
     return count;
 }
 
-/* Open-Meteo weather code -> simple unicode symbol */
+/* Open-Meteo weather code -> Unicode symbol (UTF-8 encoded directly) */
 static void icon_for_code(int code, char *out, size_t outsz){
-    const char *sym = "☁";
-    if(code==0) sym="☀";
-    else if(code==1 || code==2) sym="⛅";
-    else if(code==3) sym="☁";
-    else if(code==45 || code==48) sym="☁";
-    else if(code>=51 && code<=57) sym="☂";
-    else if(code>=61 && code<=67) sym="☂";
-    else if(code>=71 && code<=77) sym="❄";
-    else if(code>=80 && code<=82) sym="☂";
-    else if(code>=95) sym="⚡";
-    snprintf(out, outsz, "%s", sym);
+    /* Use Unicode characters - ensure proper UTF-8 encoding and null termination */
+    const char *sym = "\342\230\201";  /* ☁ cloud (U+2601) - UTF-8: E2 98 81 */
+    if(code == 0) sym = "\342\230\200";  /* ☀ sun (U+2600) - UTF-8: E2 98 80 */
+    else if(code == 1 || code == 2) sym = "\342\233\205";  /* ⛅ sun behind cloud (U+26C5) - UTF-8: E2 9B 85 */
+    else if(code == 3 || code == 45 || code == 48) sym = "\342\230\201";  /* ☁ cloud (U+2601) */
+    else if(code >= 51 && code <= 57) sym = "\342\230\224";  /* ☔ umbrella with rain (U+2614) - UTF-8: E2 98 94 */
+    else if(code >= 61 && code <= 67) sym = "\342\230\224";  /* ☔ umbrella with rain (U+2614) */
+    else if(code >= 71 && code <= 77) sym = "\342\235\204";  /* ❄ snowflake (U+2744) - UTF-8: E2 9D 84 */
+    else if(code >= 80 && code <= 82) sym = "\342\230\224";  /* ☔ umbrella with rain (U+2614) */
+    else if(code >= 95) sym = "\342\232\241";  /* ⚡ lightning (U+26A1) - UTF-8: E2 9A A1 */
+    else if(code == 96 || code == 99) sym = "\342\232\241";  /* ⚡ lightning (U+26A1) */
+    /* Copy with explicit length to ensure proper UTF-8 handling */
+    size_t len = strlen(sym);
+    if(len < outsz){
+        memcpy(out, sym, len);
+        out[len] = '\0';
+    } else {
+        out[0] = '\0';
+    }
 }
 
 static int geocode_stop_to_latlon(const char *stop_name, double *olat, double *olon){
@@ -508,13 +521,86 @@ static void fetch_weather(Weather *w, const char *stop_name){
     w->last_fetch = now;
 }
 
+#define TILE_COLS_FIXED 2
+#define TILE_ROWS_FIXED  6
+#define TILE_SLOTS_MAX   (TILE_COLS_FIXED * TILE_ROWS_FIXED)
+
+#define STEAM_PUFFS  4
+#define STEAM_PUFF_SIZE  96
+
+typedef struct SteamPuff {
+    float x, y;
+    float alpha;
+    float scale;
+    float rise;
+} SteamPuff;
+
+/* Draw one tile's content (background + text) into rect. Used for both normal draw and flip texture. */
+static void draw_tile_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
+                              SDL_Rect rect, float scale,
+                              SDL_Color white, SDL_Color dim, int radius){
+    int inner = clampi((int)(32*scale), 12, 60);
+    int x = rect.x + inner;
+    int y = rect.y + clampi((int)(20*scale), 8, 40);  /* Move route text up */
+
+    SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
+    fill_round_rect(r, rect, radius);
+
+    char busnum[64];
+    const char *busid = a->bus;
+    if(!busid || !busid[0]) snprintf(busnum, sizeof(busnum), "--");
+    else {
+        const char *p = strrchr(busid, '_');
+        if(p && p[1]) busid = p + 1;
+        else {
+            const char *sp = strrchr(busid, ' ');
+            if(sp && sp[1]) busid = sp + 1;
+        }
+        snprintf(busnum, sizeof(busnum), "%s", busid);
+    }
+    const char *route = a->route[0] ? a->route : "--";
+    const char *dest  = a->dest[0]  ? a->dest  : "--";
+    char minsbuf[16];
+    if(a->mins == 0) snprintf(minsbuf, sizeof(minsbuf), "NOW");
+    else if(a->mins > 0) snprintf(minsbuf, sizeof(minsbuf), "%d", a->mins);
+    else snprintf(minsbuf, sizeof(minsbuf), "--");
+
+    int route_w = 0, eta_w = 0;
+    text_size(f->tile_big, route, &route_w, NULL);
+    text_size(f->tile_big, minsbuf, &eta_w, NULL);
+    int line1_gap = clampi((int)(10*scale), 6, 20);
+    int max_dest_w = rect.w - 2*inner - route_w - eta_w - line1_gap*2;
+    if(max_dest_w < 40) max_dest_w = 40;
+
+    draw_text(r, f->tile_big, route, x, y, white, 0);
+    char dest_line[256];
+    snprintf(dest_line, sizeof(dest_line), " - %s", dest);
+    draw_text_trunc(r, f->tile_med, dest_line, x + route_w + line1_gap, y, max_dest_w, dim, 0);
+    draw_text(r, f->tile_big, minsbuf, rect.x + rect.w - inner, y, white, 2);
+
+    int y2 = y + clampi((int)(120*scale), 70, 190);
+    char stopsbuf[32];
+    if(a->stops_away >= 0) snprintf(stopsbuf, sizeof(stopsbuf), "%d", a->stops_away);
+    else snprintf(stopsbuf, sizeof(stopsbuf), "--");
+    char milesbuf[32];
+    if(a->miles_away >= 0.0) snprintf(milesbuf, sizeof(milesbuf), "%.1f", (double)a->miles_away);
+    else snprintf(milesbuf, sizeof(milesbuf), "--");
+    char meta[256];
+    snprintf(meta, sizeof(meta), "%s stops  •  %d ppl  •  BUS %s  •  %s mi",
+             stopsbuf, a->ppl_est, busnum, milesbuf);
+    draw_text(r, f->tile_small, meta, x, y2, dim, 0);
+    if(a->mins != 0)
+        draw_text(r, f->tile_small, "min", rect.x + rect.w - inner, y2, dim, 2);
+}
+
 static void render_ui(SDL_Renderer *r, Fonts *f,
                       int W, int H,
                       const char *stop_id,
                       const char *stop_name,
                       Weather *wx,
                       Arrival *arr, int n,
-                      int tile_cols) {
+                      SDL_Texture *bg_tex,
+                      SDL_Texture *steam_tex) {
     SDL_Color white = {255,255,255,255};
     SDL_Color dim   = {210,210,210,255};
 
@@ -524,34 +610,106 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
     float scale = (H>0) ? ((float)H / 2160.0f) : 1.0f;
     int pad = clampi((int)(46*scale), 18, 90);
     int header_h = clampi((int)(260*scale), 140, 420);
+    int body_y = pad + header_h + pad;
+    int body_h = H - body_y - pad;
+    if(body_h < 100) body_h = 100;
+
+    /* Background image first: enable blending + alpha set at load; draw before header and tiles */
+    if(bg_tex){
+        SDL_Rect dst = { 0, body_y, W, body_h };
+        SDL_RenderCopy(r, bg_tex, NULL, &dst);
+    }
+
+    /* Steam/smoke drift: puffs from exhaust pipe openings, using image scaled/translated position */
+    if(steam_tex){
+        static SteamPuff puffs[STEAM_PUFFS];
+        static int init;
+        /* Exhaust positions in IMAGE space (fraction 0–1 of the drawn background rect).
+         * Background is drawn at dst = (0, body_y, W, body_h), so image-space (fx, fy) maps to
+         * screen: x = fx*W, y = body_y + fy*body_h. */
+        const float exhaust_img_x[STEAM_PUFFS] = { 0.22f, 0.45f, 0.55f, 0.78f };
+        const float exhaust_img_y[STEAM_PUFFS] = { 0.88f, 0.85f, 0.85f, 0.88f };
+        const float rise_speed = 0.22f;   /* slow drift up */
+        const float fade_speed = 0.28f;   /* fade out slowly so they drift longer */
+        const float scale_grow = 0.0012f;
+        const float puff_size_mult = 2.f;  /* puffs 2x larger */
+
+        if(!init){
+            for(int i = 0; i < STEAM_PUFFS; i++){
+                puffs[i].x = (float)W * exhaust_img_x[i];
+                puffs[i].y = (float)body_y + (float)body_h * exhaust_img_y[i];
+                puffs[i].alpha = 200.f;
+                puffs[i].scale = 0.7f + (float)(i % 3) * 0.1f;
+                puffs[i].rise = rise_speed + (float)(i % 2) * 0.06f;
+            }
+            init = 1;
+        }
+
+        SDL_SetTextureBlendMode(steam_tex, SDL_BLENDMODE_BLEND);
+        for(int i = 0; i < STEAM_PUFFS; i++){
+            puffs[i].y -= puffs[i].rise;
+            puffs[i].alpha -= fade_speed;
+            puffs[i].scale += scale_grow;
+
+            if(puffs[i].alpha <= 0.f || puffs[i].y < (float)(body_y - 120)){
+                /* Respawn at this exhaust (image-space position → screen) */
+                float ex_x = (float)W * exhaust_img_x[i];
+                float ex_y = (float)body_y + (float)body_h * exhaust_img_y[i];
+                puffs[i].x = ex_x + (float)((i * 17) % 21 - 10);
+                puffs[i].y = ex_y + (float)((i * 11) % 12);
+                puffs[i].alpha = 220.f;
+                puffs[i].scale = 0.6f + (float)(i % 3) * 0.1f;
+                puffs[i].rise = rise_speed + (float)(i % 2) * 0.05f;
+            }
+
+            int a = (int)puffs[i].alpha;
+            if(a > 0){
+                int sz = (int)(STEAM_PUFF_SIZE * puffs[i].scale * puff_size_mult);
+                if(sz < 12) sz = 12;
+                SDL_Rect dst = {
+                    (int)puffs[i].x - sz/2,
+                    (int)puffs[i].y - sz/2,
+                    sz, sz
+                };
+                SDL_SetTextureAlphaMod(steam_tex, a > 255 ? 255 : a);
+                SDL_RenderCopy(r, steam_tex, NULL, &dst);
+            }
+        }
+    }
 
     SDL_Rect hdr = { pad, pad, W - 2*pad, header_h };
     SDL_SetRenderDrawColor(r, 22, 26, 34, 255);
     fill_round_rect(r, hdr, clampi((int)(24*scale), 10, 40));
+
+    /* Application name centered at top of header */
+    draw_text(r, f->h1, "Arrival Board", hdr.x + hdr.w / 2, hdr.y + clampi((int)(22*scale), 10, 36), white, 1);
 
     char left1[256];
     if(stop_name && *stop_name) snprintf(left1, sizeof(left1), "%s", stop_name);
     else snprintf(left1, sizeof(left1), "Stop %s", stop_id ? stop_id : "--");
 
     int left_x = hdr.x + pad;
-    int top_y  = hdr.y + clampi((int)(26*scale), 12, 44);
+    int top_y  = hdr.y + clampi((int)(52*scale), 28, 80);
 
-    draw_text_trunc(r, f->h1, left1, left_x, top_y, hdr.w - 2*pad - (int)(560*scale), white, 0);
+    draw_text_trunc(r, f->h2, left1, left_x, top_y, hdr.w - 2*pad - (int)(560*scale), white, 0);
 
     char left2[256];
     snprintf(left2, sizeof(left2), "Stop %s", stop_id ? stop_id : "--");
     /* add a bit more vertical space between the two header text lines */
-    draw_text(r, f->h2, left2, left_x, top_y + clampi((int)(104*scale), 60, 160), dim, 0);
+    draw_text(r, f->h2, left2, left_x, top_y + clampi((int)(78*scale), 44, 120), dim, 0);
 
+    int right_x = hdr.x + hdr.w - pad;
     time_t now = time(NULL);
     struct tm lt;
     localtime_r(&now, &lt);
     char ts[64];
     strftime(ts, sizeof(ts), "%a %b %-d  %-I:%M %p", &lt);
-    /* nudge clock down slightly to keep comfortable spacing from header title */
-    draw_text(r, f->h2, ts, hdr.x + hdr.w/2, hdr.y + clampi((int)(122*scale), 80, 200), white, 1);
+    
+    /* Date/time: top of text touches top of header */
+    int ts_h = 0;
+    text_size(f->h2, ts, NULL, &ts_h);
+    draw_text(r, f->h2, ts, right_x, hdr.y, white, 2);
 
-    int right_x = hdr.x + hdr.w - pad;
     if(wx && wx->have){
         char wline1[128];
         snprintf(wline1, sizeof(wline1), "%s  %d°F", wx->icon, wx->temp_f);
@@ -561,15 +719,26 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
         else if(wx->precip_in >= 0) snprintf(wline2, sizeof(wline2), "Precip %.2f in", wx->precip_in);
         else snprintf(wline2, sizeof(wline2), "Precip --");
 
-        draw_text(r, f->h1, wline1, right_x, top_y, white, 2);
-        /* a bit more gap between weather temp and precipitation line */
-        draw_text(r, f->h2, wline2, right_x, top_y + clampi((int)(104*scale), 60, 160), dim, 2);
+        /* Weather icon + temp: center vertically in header */
+        int wline1_h = 0;
+        text_size(f->h2, wline1, NULL, &wline1_h);
+        int weather_y = hdr.y + (header_h - wline1_h) / 2;
+        draw_text(r, f->h2, wline1, right_x, weather_y, white, 2);
+
+        /* Precipitation: bottom of text touches bottom of header */
+        int wline2_h = 0;
+        text_size(f->h2, wline2, NULL, &wline2_h);
+        int precip_y = hdr.y + header_h - wline2_h;
+        draw_text(r, f->h2, wline2, right_x, precip_y, dim, 2);
     } else {
-        draw_text(r, f->h2, "Weather --", right_x, top_y + clampi((int)(104*scale), 60, 160), dim, 2);
+        int wline_h = 0;
+        text_size(f->h2, "Weather --", NULL, &wline_h);
+        int weather_y = hdr.y + (header_h - wline_h) / 2;
+        draw_text(r, f->h2, "Weather --", right_x, weather_y, dim, 2);
     }
 
-    int body_y = hdr.y + hdr.h + pad;
-    int body_h = H - body_y - pad;
+    body_y = hdr.y + hdr.h + pad;
+    body_h = H - body_y - pad;
     if(body_h < 100) body_h = 100;
 
     if(n <= 0){
@@ -578,17 +747,18 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
         return;
     }
 
-    int cols = clampi(tile_cols, 1, 6);
-    int rows = (n + cols - 1) / cols;
-    if(rows < 1) rows = 1;
-
+    /* Fixed 6 columns, 2 rows; tile size does not change with number of buses. */
+    const int cols = TILE_COLS_FIXED;
+    const int rows = TILE_ROWS_FIXED;
     int gap = clampi((int)(38*scale), 14, 70);
     int tile_w = (W - 2*pad - gap*(cols-1)) / cols;
     int tile_h = (body_h - gap*(rows-1)) / rows;
 
     int radius = clampi((int)(26*scale), 10, 42);
 
-    for(int i=0; i<n; i++){
+    /* Only draw tiles for buses we have; no empty placeholder tiles. */
+    int show_n = n < TILE_SLOTS_MAX ? n : TILE_SLOTS_MAX;
+    for(int i=0; i<show_n; i++){
         int c = i % cols;
         int rr = i / cols;
         SDL_Rect trc = {
@@ -598,74 +768,7 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
             tile_h
         };
 
-        SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
-        fill_round_rect(r, trc, radius);
-
-        int inner = clampi((int)(32*scale), 12, 60);
-        int x = trc.x + inner;
-        int y = trc.y + inner;
-
-                  // Tile layout (requested):
-          // Line 1: left = BUSNUM + ROUTE (big), right = minutes (big)
-          // Line 2: left = stops/ppl/BUS#/mi (small), right = "min" (small)
-
-          // Extract just the bus number from vehicle id (strip "MTA NYCT_" etc.)
-          char busnum[64];
-          const char *busid = arr[i].bus;
-          if(!busid || !busid[0]) {
-              snprintf(busnum, sizeof(busnum), "--");
-          } else {
-              const char *p = strrchr(busid, '_');
-              if(p && p[1]) busid = p + 1;
-              else {
-                  const char *sp = strrchr(busid, ' ');
-                  if(sp && sp[1]) busid = sp + 1;
-              }
-              snprintf(busnum, sizeof(busnum), "%s", busid);
-          }
-
-          const char *route = arr[i].route[0] ? arr[i].route : "--";
-          const char *dest  = arr[i].dest[0]  ? arr[i].dest  : "--";
-
-          /* First line: ROUTE - DESTINATION (no vehicle number here). */
-          char title_line[256];
-          snprintf(title_line, sizeof(title_line), "%.24s - %.64s", route, dest);
-
-          draw_text(r, f->tile_big, title_line, x, y, white, 0);
-
-          char minsbuf[16];
-          if(arr[i].mins == 0) {
-              /* Show NOW instead of 0 when the bus is at the stop. */
-              snprintf(minsbuf, sizeof(minsbuf), "NOW");
-          } else if(arr[i].mins > 0) {
-              snprintf(minsbuf, sizeof(minsbuf), "%d", arr[i].mins);
-          } else {
-              snprintf(minsbuf, sizeof(minsbuf), "--");
-          }
-          draw_text(r, f->tile_big, minsbuf, trc.x + trc.w - inner, y, white, 2);
-
-          // Second line baseline – pushed slightly further down for clearer separation.
-          int y2 = y + clampi((int)(120*scale), 70, 190);
-
-          char stopsbuf[32];
-          if(arr[i].stops_away >= 0) snprintf(stopsbuf, sizeof(stopsbuf), "%d", arr[i].stops_away);
-          else snprintf(stopsbuf, sizeof(stopsbuf), "--");
-
-          char milesbuf[32];
-          if(arr[i].miles_away >= 0.0) snprintf(milesbuf, sizeof(milesbuf), "%.1f", (double)arr[i].miles_away);
-          else snprintf(milesbuf, sizeof(milesbuf), "--");
-
-          char meta[256];
-          snprintf(meta, sizeof(meta),
-                   "%s stops  •  %d ppl  •  BUS %s  •  %s mi",
-                   stopsbuf, arr[i].ppl_est, busnum, milesbuf);
-
-          draw_text(r, f->tile_small, meta, x, y2, dim, 0);
-
-          /* Hide the "min" label when we are displaying NOW. */
-          if(!(arr[i].mins == 0)) {
-              draw_text(r, f->tile_small, "min", trc.x + trc.w - inner, y2, dim, 2);
-          }
+        draw_tile_content(r, f, &arr[i], trc, scale, white, dim, radius);
     }
 
     SDL_RenderPresent(r);
@@ -683,11 +786,6 @@ int main(int argc, char **argv){
     const char *poll_s = getenv("POLL_SECONDS");
     int poll = poll_s ? atoi(poll_s) : 10;
     if(poll < 5) poll = 5;
-
-    /* Default back to 2 columns unless env overrides. */
-    const char *cols_s = getenv("TILE_COLS");
-    int tile_cols = cols_s ? atoi(cols_s) : 2;
-    if(tile_cols < 1) tile_cols = 2;
 
     const char *max_s = getenv("MAX_TILES");
     int max_tiles = max_s ? atoi(max_s) : 12;
@@ -708,6 +806,11 @@ int main(int argc, char **argv){
         SDL_Quit();
         return 1;
     }
+#ifdef USE_SDL_IMAGE
+    if((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) == 0){
+        logf_("IMG_Init PNG failed: %s", IMG_GetError());
+    }
+#endif
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
 
@@ -732,6 +835,83 @@ int main(int argc, char **argv){
     int W=0,H=0;
     SDL_GetRendererOutputSize(r, &W, &H);
     if(W<=0 || H<=0) SDL_GetWindowSize(win, &W, &H);
+
+    /* Load background image (under the tiles). Path: env BACKGROUND_IMAGE or "Steampunk bus image.png" in cwd. */
+    SDL_Texture *bg_tex = NULL;
+    SDL_Texture *steam_tex = NULL;
+#ifdef USE_SDL_IMAGE
+    const char *bg_path = getenv("BACKGROUND_IMAGE");
+    if(!bg_path || !*bg_path) bg_path = "Steampunk bus image.png";
+    SDL_Surface *bg_surf = IMG_Load(bg_path);
+    if(!bg_surf && getenv("HOME")){
+        char alt[512];
+        snprintf(alt, sizeof(alt), "%s/arrival_board/Steampunk bus image.png", getenv("HOME"));
+        bg_surf = IMG_Load(alt);
+        if(bg_surf) bg_path = alt;
+    }
+    if(bg_surf){
+        bg_tex = SDL_CreateTextureFromSurface(r, bg_surf);
+        SDL_FreeSurface(bg_surf);
+        if(!bg_tex) logf_("Could not create texture from background image");
+        else {
+            SDL_SetTextureBlendMode(bg_tex, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureAlphaMod(bg_tex, 64);  /* 25% opacity so it blends into black background */
+            logf_("Background image loaded: %s", bg_path);
+        }
+    } else {
+        logf_("Could not load background image '%s': %s", bg_path, IMG_GetError());
+    }
+#endif
+
+    /* Load steam puff texture (one small soft white PNG, reused for all puffs). Create if missing. */
+#ifdef USE_SDL_IMAGE
+    {
+        const char *steam_path = "steam_puff.png";
+        char steam_alt[512];
+        SDL_Surface *steam_surf = IMG_Load(steam_path);
+        if(!steam_surf && getenv("HOME")){
+            snprintf(steam_alt, sizeof(steam_alt), "%s/arrival_board/steam_puff.png", getenv("HOME"));
+            steam_surf = IMG_Load(steam_alt);
+            if(steam_surf) steam_path = steam_alt;
+        }
+        if(!steam_surf){
+            /* Pre-render one small soft white puff and save as PNG */
+            const int sz = STEAM_PUFF_SIZE;
+            steam_surf = SDL_CreateRGBSurfaceWithFormat(0, sz, sz, 32, SDL_PIXELFORMAT_RGBA8888);
+            if(steam_surf){
+                const float cen = (float)(sz / 2);
+                const float rad = cen - 4.f;
+                SDL_LockSurface(steam_surf);
+                Uint32 *pix = (Uint32 *)steam_surf->pixels;
+                for(int y = 0; y < sz; y++){
+                    for(int x = 0; x < sz; x++){
+                        float dx = (float)x - cen, dy = (float)y - cen;
+                        float d = sqrtf(dx*dx + dy*dy);
+                        Uint8 alpha = 0;
+                        if(d < rad){
+                            float t = 1.f - (d / rad) * (d / rad);
+                            if(t > 0.f){ t = (float)pow((double)t, 1.5); alpha = (Uint8)(220.f * t); }
+                        }
+                        pix[y * steam_surf->pitch / 4 + x] = (0xFFU << 24) | (255u << 16) | (255u << 8) | (unsigned)alpha;
+                    }
+                }
+                SDL_UnlockSurface(steam_surf);
+                if(IMG_SavePNG(steam_surf, steam_path) == 0)
+                    logf_("Created %s", steam_path);
+                SDL_FreeSurface(steam_surf);
+                steam_surf = IMG_Load(steam_path);
+            }
+        }
+        if(steam_surf){
+            steam_tex = SDL_CreateTextureFromSurface(r, steam_surf);
+            SDL_FreeSurface(steam_surf);
+            if(steam_tex){
+                SDL_SetTextureBlendMode(steam_tex, SDL_BLENDMODE_BLEND);
+                logf_("Steam puff texture loaded");
+            }
+        }
+    }
+#endif
 
     Fonts fonts;
     if(tile_load_fonts(&fonts, font_path, H) != 0){
@@ -775,15 +955,20 @@ int main(int argc, char **argv){
         }
 
         SDL_GetRendererOutputSize(r, &W, &H);
-        render_ui(r, &fonts, W, H, stop_id ? stop_id : "--", stop_name, &wx, arrivals, n, tile_cols);
+        render_ui(r, &fonts, W, H, stop_id ? stop_id : "--", stop_name, &wx, arrivals, n, bg_tex, steam_tex);
 
         SDL_Delay(80);
     }
 
 done:
+    if(bg_tex) SDL_DestroyTexture(bg_tex);
+    if(steam_tex) SDL_DestroyTexture(steam_tex);
     tile_free_fonts(&fonts);
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(win);
+#ifdef USE_SDL_IMAGE
+    IMG_Quit();
+#endif
     TTF_Quit();
     SDL_Quit();
     return 0;

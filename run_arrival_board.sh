@@ -1,34 +1,42 @@
-#!/bin/sh
+#!/bin/bash
+set -u
+exec >>"$HOME/arrival_board/boot.log" 2>&1
 set -x
-cd "$HOME/arrival_board" || exit 1
 
-# Load env file and export vars to children
+cd "$HOME/arrival_board" || exit 1
+# Same env as at boot (SDL_VIDEODRIVER=kmsdrm, etc.) so it runs when started manually
 if [ -f "$HOME/arrival_board/arrival_board.env" ]; then
   set -a
   . "$HOME/arrival_board/arrival_board.env"
   set +a
 fi
+ulimit -n "${ULIMIT_NOFILE:-16384}" || true
 
-echo "---- run_arrival_board.sh start $(date) ----"
-# don't dump the key value; just show whether it's set
-[ -n "${MTA_KEY:-}" ] && echo "MTA_KEY=set" || echo "MTA_KEY=NOT_SET"
-echo "STOP_ID=${STOP_ID:-NOT_SET}  POLL_SECONDS=${POLL_SECONDS:-NOT_SET}"
-echo "SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-NOT_SET}  SDL_RENDER_DRIVER=${SDL_RENDER_DRIVER:-NOT_SET}"
-echo "FONT_PATH=${FONT_PATH:-NOT_SET}"
+# operate on controlling tty (tty1) without hardcoding redirections that can hang
+setterm -blank 0 -powerdown 0 -powersave off || true
+printf "\033[?25l" || true
 
-# Warm up HDMI audio so first beep isn't clipped
-if [ -n "${APLAY_DEVICE:-}" ] && [ -n "${SOUND_NEW:-}" ] && [ -f "${SOUND_NEW:-}" ]; then
-  sleep 1
-  aplay -q -D "$APLAY_DEVICE" "$SOUND_NEW" >/dev/null 2>&1 || true
-fi
+echo "=== run_arrival_board.sh ==="
+date
+echo "USER=$(id -un) UID=$(id -u) ULIMIT_NOFILE=$(ulimit -n)"
+echo "ENV: SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-<unset>} SDL_RENDER_DRIVER=${SDL_RENDER_DRIVER:-<unset>} DISPLAY=${DISPLAY:-<unset>}"
+echo "CFG: STOP_ID=${STOP_ID:-<unset>} ROUTE_FILTER=${ROUTE_FILTER:-} POLL_SECONDS=${POLL_SECONDS:-10}"
 
-# Keep trying to start arrival_board; log exit code every time.
-# This keeps X alive and prevents chromium from stealing the screen.
-while :; do
-  echo "---- starting arrival_board $(date) ----"
+while true; do
+  echo "--- build ---"
+  make clean || true
+  # Prefer build with background image (Steampunk bus). Install: sudo apt-get install libsdl2-image-dev
+  if ! make -j USE_SDL_IMAGE=1; then
+    if ! make -j; then
+      echo "build failed; retrying in 2s"
+      sleep 2
+      continue
+    fi
+  fi
+
+  echo "--- run loop ---"
   ./arrival_board
   rc=$?
-  echo "---- arrival_board exited rc=$rc at $(date) ----"
-  # short backoff so we don't tight-loop
+  echo "arrival_board exited rc=$rc at $(date); restarting in 2s"
   sleep 2
 done
