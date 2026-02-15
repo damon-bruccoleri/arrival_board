@@ -1,0 +1,32 @@
+# Build products
+arrival_board
+*.o
+
+# Environment (may contain secrets); use arrival_board.env.example as template
+arrival_board.env
+arrival_board.env.bak.*
+
+# Backups and temporary files
+*.bak*
+*_backup*
+bak_*/
+revert_save_*/
+split_stash_*/
+_backup_*/
+
+# Logs
+*.log
+boot.log
+manual_run.log
+startx.log
+
+# Unused assets (app uses Damon Logo Large.png)
+32x32 logo.png
+
+# Stray debug / junk files
+last_beep_ms
+
+# Editor / OS
+.DS_Store
+*~
+*.swp
