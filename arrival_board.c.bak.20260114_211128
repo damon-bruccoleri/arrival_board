@@ -1,0 +1,712 @@
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_ttf.h>
+#include <curl/curl.h>
+#include <cjson/cJSON.h>
+
+#include <ctype.h>
+#include <errno.h>
+#include <math.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
+#define BUILD_TAG "AB_FIXED_MAXTEX_2026-01-14"
+
+static volatile sig_atomic_t g_quit = 0;
+static void on_sig(int s){ (void)s; g_quit = 1; }
+
+static void log_msg(const char *fmt, ...){
+  va_list ap; va_start(ap, fmt);
+  vfprintf(stderr, fmt, ap);
+  fputc('\n', stderr);
+  fflush(stderr);
+  va_end(ap);
+}
+
+static const char* env_str(const char *k, const char *defv){
+  const char *v = getenv(k);
+  return (v && *v) ? v : defv;
+}
+static int env_int(const char *k, int defv){
+  const char *v = getenv(k);
+  if(!v || !*v) return defv;
+  char *e=NULL; long n=strtol(v,&e,10);
+  if(e==v) return defv;
+  return (int)n;
+}
+
+typedef struct {
+  char *data;
+  size_t size;
+} MemBuf;
+
+static size_t curl_write_cb(void *contents, size_t sz, size_t nmemb, void *userp){
+  size_t realsz = sz * nmemb;
+  MemBuf *m = (MemBuf*)userp;
+  char *p = realloc(m->data, m->size + realsz + 1);
+  if(!p) return 0;
+  m->data = p;
+  memcpy(&(m->data[m->size]), contents, realsz);
+  m->size += realsz;
+  m->data[m->size] = 0;
+  return realsz;
+}
+
+static int http_get(const char *url, MemBuf *out, long *http_code){
+  *http_code = 0;
+  out->data = NULL;
+  out->size = 0;
+
+  CURL *curl = curl_easy_init();
+  if(!curl) return -1;
+
+  curl_easy_setopt(curl, CURLOPT_URL, url);
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_cb);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "arrival_board/1.0");
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+
+  CURLcode res = curl_easy_perform(curl);
+  if(res != CURLE_OK){
+    log_msg("FETCH curl error: %s", curl_easy_strerror(res));
+    curl_easy_cleanup(curl);
+    return -2;
+  }
+  curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_code);
+  curl_easy_cleanup(curl);
+  return 0;
+}
+
+static long parse_tz_offset_seconds(const char *s){
+  // s points at '+' or '-' or 'Z' or '\0'
+  if(!s || !*s) return 0;
+  if(*s=='Z') return 0;
+  if(*s!='+' && *s!='-') return 0;
+
+  int sign = (*s=='-') ? -1 : 1;
+  int hh=0, mm=0;
+  // formats: +HH:MM or +HHMM
+  if(sscanf(s+1, "%2d:%2d", &hh, &mm) == 2){
+    return sign * (hh*3600 + mm*60);
+  }
+  if(sscanf(s+1, "%2d%2d", &hh, &mm) == 2){
+    return sign * (hh*3600 + mm*60);
+  }
+  return 0;
+}
+
+static time_t iso8601_to_epoch(const char *iso){
+  // Example: 2026-01-14T18:34:08.207-05:00
+  // We parse up to seconds, ignore fractional, then apply offset.
+  if(!iso || !*iso) return (time_t)0;
+
+  int Y=0,M=0,D=0,h=0,m=0;
+  double secf=0;
+  // Parse date/time
+  // Accept: YYYY-MM-DDTHH:MM:SS(.sss)?(Z|±HH:MM)?
+  const char *p = iso;
+  if(sscanf(p, "%4d-%2d-%2dT%2d:%2d:%lf", &Y,&M,&D,&h,&m,&secf) < 6) return (time_t)0;
+
+  int sec = (int)floor(secf);
+  struct tm tmv;
+  memset(&tmv, 0, sizeof(tmv));
+  tmv.tm_year = Y - 1900;
+  tmv.tm_mon  = M - 1;
+  tmv.tm_mday = D;
+  tmv.tm_hour = h;
+  tmv.tm_min  = m;
+  tmv.tm_sec  = sec;
+  tmv.tm_isdst = -1;
+
+  // Find timezone part: last 'Z' or last '+'/'-' after time
+  const char *tz = NULL;
+  const char *z = strrchr(iso, 'Z');
+  if(z) tz = z;
+  const char *plus = strrchr(iso, '+');
+  const char *minus = strrchr(iso, '-');
+  // careful: minus appears in date too; only accept if after 'T'
+  const char *tpos = strchr(iso,'T');
+  if(plus && tpos && plus > tpos) tz = plus;
+  if(minus && tpos && minus > tpos) tz = minus;
+
+  long off = parse_tz_offset_seconds(tz);
+
+  // timegm interprets tmv as UTC. Our tmv is the local time in the string.
+  // Correct to UTC: epoch = timegm(local) - offset_seconds
+  time_t base = timegm(&tmv);
+  if(base == (time_t)-1) return (time_t)0;
+  return base - off;
+}
+
+static double meters_to_miles(double m){
+  return m / 1609.344;
+}
+
+static const char* json_get_str(const cJSON *obj, const char *key){
+  if(!obj || !key) return NULL;
+  cJSON *v = cJSON_GetObjectItemCaseSensitive((cJSON*)obj, key);
+  if(cJSON_IsString(v) && v->valuestring) return v->valuestring;
+  return NULL;
+}
+static double json_get_num(const cJSON *obj, const char *key, double defv){
+  if(!obj || !key) return defv;
+  cJSON *v = cJSON_GetObjectItemCaseSensitive((cJSON*)obj, key);
+  if(cJSON_IsNumber(v)) return v->valuedouble;
+  return defv;
+}
+static int json_get_int(const cJSON *obj, const char *key, int defv){
+  if(!obj || !key) return defv;
+  cJSON *v = cJSON_GetObjectItemCaseSensitive((cJSON*)obj, key);
+  if(cJSON_IsNumber(v)) return (int)v->valuedouble;
+  return defv;
+}
+
+static const char* json_get_arr0_str(const cJSON *obj, const char *key){
+  cJSON *arr = cJSON_GetObjectItemCaseSensitive((cJSON*)obj, key);
+  if(!cJSON_IsArray(arr)) return NULL;
+  cJSON *it = cJSON_GetArrayItem(arr, 0);
+  if(cJSON_IsString(it) && it->valuestring) return it->valuestring;
+  return NULL;
+}
+
+typedef struct {
+  char line[16];
+  char veh[32];
+  char dest[96];
+  char stopname[96];
+  char live_label[8];   // LIVE or SCHED
+  char prox[64];        // ArrivalProximityText
+  int  stops_away;
+  double miles_away;    // computed from DistanceFromStop
+  time_t eta_epoch;     // chosen arrival time
+  int eta_sec;          // seconds from now
+  bool is_live;
+} Arrival;
+
+static int cmp_arrival(const void *a, const void *b){
+  const Arrival *A = (const Arrival*)a;
+  const Arrival *B = (const Arrival*)b;
+  if(A->eta_epoch < B->eta_epoch) return -1;
+  if(A->eta_epoch > B->eta_epoch) return  1;
+  // secondary sort: closer distance first
+  if(A->miles_away < B->miles_away) return -1;
+  if(A->miles_away > B->miles_away) return  1;
+  return 0;
+}
+
+static void trim_vehicle_id(const char *src, char *dst, size_t dstsz){
+  // "MTA NYCT_8838" -> "8838"
+  if(!src){ snprintf(dst, dstsz, "?"); return; }
+  const char *u = strrchr(src, '_');
+  const char *p = u ? (u+1) : src;
+  while(*p && isspace((unsigned char)*p)) p++;
+  snprintf(dst, dstsz, "%s", p);
+}
+
+static int parse_arrivals(const char *json_txt,
+                          Arrival **out_arr, int *out_n,
+                          const char *stop_ref, const char *route_filter,
+                          int lookahead_sec, time_t now_epoch){
+  *out_arr = NULL;
+  *out_n = 0;
+
+  cJSON *root = cJSON_Parse(json_txt);
+  if(!root){
+    log_msg("PARSE: cJSON_Parse failed");
+    return -1;
+  }
+
+  cJSON *siri = cJSON_GetObjectItemCaseSensitive(root, "Siri");
+  cJSON *sd   = siri ? cJSON_GetObjectItemCaseSensitive(siri, "ServiceDelivery") : NULL;
+  cJSON *smd  = sd ? cJSON_GetObjectItemCaseSensitive(sd, "StopMonitoringDelivery") : NULL;
+  cJSON *del0 = (smd && cJSON_IsArray(smd)) ? cJSON_GetArrayItem(smd, 0) : NULL;
+  cJSON *msv  = del0 ? cJSON_GetObjectItemCaseSensitive(del0, "MonitoredStopVisit") : NULL;
+
+  if(!msv || !cJSON_IsArray(msv)){
+    log_msg("PARSE: no MonitoredStopVisit array");
+    cJSON_Delete(root);
+    return 0;
+  }
+
+  int cap = cJSON_GetArraySize(msv);
+  if(cap < 1){ cJSON_Delete(root); return 0; }
+
+  Arrival *arr = calloc((size_t)cap, sizeof(Arrival));
+  if(!arr){ cJSON_Delete(root); return -2; }
+
+  int n=0;
+  for(int i=0; i<cap; i++){
+    cJSON *visit = cJSON_GetArrayItem(msv, i);
+    if(!visit) continue;
+
+    cJSON *mj = cJSON_GetObjectItemCaseSensitive(visit, "MonitoredVehicleJourney");
+    if(!mj) continue;
+
+    const char *line = json_get_arr0_str(mj, "PublishedLineName");
+    if(!line) line = "?";
+
+    // route filter: allow empty = show all
+    if(route_filter && *route_filter){
+      // route_filter may be "Q27" or "QM8", compare case-insensitive
+      char lf[32]; snprintf(lf, sizeof(lf), "%s", line);
+      char rf[32]; snprintf(rf, sizeof(rf), "%s", route_filter);
+      for(char *p=lf; *p; p++) *p = (char)toupper((unsigned char)*p);
+      for(char *p=rf; *p; p++) *p = (char)toupper((unsigned char)*p);
+      if(strcmp(lf, rf) != 0) continue;
+    }
+
+    const char *vehref = json_get_str(mj, "VehicleRef");
+    const char *dest   = json_get_arr0_str(mj, "DestinationName");
+    const char *stopnm = NULL;
+
+    cJSON *mc = cJSON_GetObjectItemCaseSensitive(mj, "MonitoredCall");
+    if(!mc) continue;
+
+    const char *spr = json_get_str(mc, "StopPointRef");
+    if(stop_ref && *stop_ref){
+      if(!spr || strcmp(spr, stop_ref) != 0){
+        // Only keep the call that matches our stop
+        continue;
+      }
+    }
+
+    stopnm = json_get_arr0_str(mc, "StopPointName");
+    if(!stopnm) stopnm = "";
+
+    const char *expected = json_get_str(mc, "ExpectedArrivalTime");
+    const char *aimed    = json_get_str(mc, "AimedArrivalTime");
+
+    time_t t_exp = expected ? iso8601_to_epoch(expected) : 0;
+    time_t t_aim = aimed    ? iso8601_to_epoch(aimed)    : 0;
+
+    bool is_live = (t_exp != 0);
+    time_t eta = is_live ? t_exp : t_aim;
+    if(eta == 0) continue;
+
+    int eta_sec = (int)difftime(eta, now_epoch);
+
+    if(eta_sec < -60) continue;            // too far in the past
+    if(eta_sec > lookahead_sec) continue;  // beyond horizon
+
+    double distm = json_get_num(mc, "DistanceFromStop", -1);
+    int stops    = json_get_int(mc, "NumberOfStopsAway", -1);
+    const char *prox = json_get_str(mc, "ArrivalProximityText");
+    if(!prox) prox = "";
+
+    Arrival a;
+    memset(&a, 0, sizeof(a));
+    snprintf(a.line, sizeof(a.line), "%s", line);
+    trim_vehicle_id(vehref, a.veh, sizeof(a.veh));
+    snprintf(a.dest, sizeof(a.dest), "%s", dest ? dest : "");
+    snprintf(a.stopname, sizeof(a.stopname), "%s", stopnm);
+    snprintf(a.prox, sizeof(a.prox), "%s", prox);
+    a.stops_away = stops;
+    a.miles_away = (distm >= 0) ? meters_to_miles(distm) : -1.0;
+    a.eta_epoch  = eta;
+    a.eta_sec    = eta_sec;
+    a.is_live    = is_live;
+    snprintf(a.live_label, sizeof(a.live_label), "%s", is_live ? "LIVE" : "SCHED");
+
+    arr[n++] = a;
+  }
+
+  cJSON_Delete(root);
+
+  if(n > 1) qsort(arr, (size_t)n, sizeof(Arrival), cmp_arrival);
+
+  *out_arr = arr;
+  *out_n = n;
+  return n;
+}
+
+typedef struct {
+  SDL_Texture *tex;
+  int w, h;
+} Tex;
+
+static void tex_destroy(Tex *t){
+  if(t && t->tex){ SDL_DestroyTexture(t->tex); t->tex=NULL; }
+  if(t){ t->w=0; t->h=0; }
+}
+
+static Tex make_text(SDL_Renderer *r, TTF_Font *f, SDL_Color col, const char *txt){
+  Tex t; t.tex=NULL; t.w=0; t.h=0;
+  if(!txt) txt="";
+  SDL_Surface *s = TTF_RenderUTF8_Blended(f, txt, col);
+  if(!s) return t;
+  SDL_Texture *x = SDL_CreateTextureFromSurface(r, s);
+  if(!x){ SDL_FreeSurface(s); return t; }
+  t.tex = x; t.w = s->w; t.h = s->h;
+  SDL_FreeSurface(s);
+  return t;
+}
+
+static void draw_tex(SDL_Renderer *r, Tex t, int x, int y){
+  if(!t.tex) return;
+  SDL_Rect dst = { x, y, t.w, t.h };
+  SDL_RenderCopy(r, t.tex, NULL, &dst);
+}
+
+static void draw_box(SDL_Renderer *r, SDL_Rect rc, SDL_Color fill, SDL_Color border){
+  SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+  SDL_SetRenderDrawColor(r, fill.r, fill.g, fill.b, fill.a);
+  SDL_RenderFillRect(r, &rc);
+  SDL_SetRenderDrawColor(r, border.r, border.g, border.b, border.a);
+  SDL_RenderDrawRect(r, &rc);
+}
+
+static void fmt_eta(int eta_sec, char *buf, size_t bufsz){
+  if(eta_sec <= 0){
+    snprintf(buf, bufsz, "DUE");
+    return;
+  }
+  int min = eta_sec / 60;
+  int sec = eta_sec % 60;
+  if(min >= 100){
+    snprintf(buf, bufsz, "%d", min); // huge
+    return;
+  }
+  // We will show minutes only; seconds were causing overlap.
+  // If under 1 min, show "<1".
+  if(min == 0) snprintf(buf, bufsz, "<1");
+  else snprintf(buf, bufsz, "%d", min);
+}
+
+static void fmt_dist_stops(const Arrival *a, char *buf, size_t bufsz){
+  char d[64]="";
+  char s[64]="";
+  if(a->miles_away >= 0){
+    // 0.0–9.9 in one decimal, else 1 decimal still ok
+    snprintf(d, sizeof(d), "%.1f miles", a->miles_away);
+  } else if(a->prox[0]){
+    snprintf(d, sizeof(d), "%s", a->prox);
+  }
+
+  if(a->stops_away >= 0){
+    if(a->stops_away == 1) snprintf(s, sizeof(s), "1 stop");
+    else snprintf(s, sizeof(s), "%d stops", a->stops_away);
+  }
+
+  if(d[0] && s[0]) snprintf(buf, bufsz, "%s | %s", d, s);
+  else if(d[0])   snprintf(buf, bufsz, "%s", d);
+  else if(s[0])   snprintf(buf, bufsz, "%s", s);
+  else if(a->prox[0]) snprintf(buf, bufsz, "%s", a->prox);
+  else snprintf(buf, bufsz, "");
+}
+
+int main(int argc, char **argv){
+  (void)argc; (void)argv;
+
+  signal(SIGINT,  on_sig);
+  signal(SIGTERM, on_sig);
+
+  const char *mta_key = getenv("MTA_KEY"); // do NOT embed key in code
+  const char *stop_id = env_str("STOP_ID", "501627");
+  const char *route_filter = env_str("ROUTE_FILTER", "");
+  int poll_seconds = env_int("POLL_SECONDS", 10);
+  int lookahead_min = env_int("LOOKAHEAD_MIN", 30);
+  int lookahead_sec = lookahead_min * 60;
+
+  const char *font_path = getenv("FONT_PATH");
+  if(!font_path || !*font_path) font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+
+  if(!mta_key || !*mta_key){
+    log_msg("ERROR: MTA_KEY is not set in environment.");
+    return 2;
+  }
+
+  // StopPointRef in JSON is "MTA_<digits>"
+  char stop_ref[32];
+  snprintf(stop_ref, sizeof(stop_ref), "MTA_%s", stop_id);
+
+  if(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0){
+    log_msg("ERROR: SDL_Init: %s", SDL_GetError());
+    return 1;
+  }
+  if(TTF_Init() != 0){
+    log_msg("ERROR: TTF_Init: %s", TTF_GetError());
+    SDL_Quit();
+    return 1;
+  }
+
+  SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+
+  SDL_Window *win = SDL_CreateWindow("Arrival Board",
+                                     SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                     1280, 720,
+                                     SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_SHOWN);
+  if(!win){
+    log_msg("ERROR: SDL_CreateWindow: %s", SDL_GetError());
+    TTF_Quit(); SDL_Quit();
+    return 1;
+  }
+
+  SDL_Renderer *ren = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+  if(!ren){
+    log_msg("ERROR: SDL_CreateRenderer: %s", SDL_GetError());
+    SDL_DestroyWindow(win);
+    TTF_Quit(); SDL_Quit();
+    return 1;
+  }
+
+  int W=0,H=0;
+  SDL_GetRendererOutputSize(ren, &W, &H);
+
+  SDL_RendererInfo info;
+  memset(&info, 0, sizeof(info));
+  SDL_GetRendererInfo(ren, &info);
+
+  // IMPORTANT FIX: Some renderers report 0 for max texture. Treat 0 as "unknown/no limit".
+  int maxTexW = info.max_texture_width;
+  int maxTexH = info.max_texture_height;
+  if(maxTexW <= 0) maxTexW = 16384;
+  if(maxTexH <= 0) maxTexH = 16384;
+
+  log_msg("BUILD_TAG=%s", BUILD_TAG);
+  log_msg("Renderer size %dx%d", W, H);
+  log_msg("Renderer: %s maxTex=%dx%d", info.name ? info.name : "?", maxTexW, maxTexH);
+
+  SDL_ShowCursor(SDL_DISABLE);
+
+  // Font sizes tuned for 4K
+  int title_px = (H >= 2000) ? 44 : 28;
+  int route_px = (H >= 2000) ? 40 : 26;
+  int body_px  = (H >= 2000) ? 36 : 22;
+  int small_px = (H >= 2000) ? 29 : 18;
+  int eta_px   = (H >= 2000) ? 60 : 40;
+
+  TTF_Font *f_title = TTF_OpenFont(font_path, title_px);
+  TTF_Font *f_route = TTF_OpenFont(font_path, route_px);
+  TTF_Font *f_body  = TTF_OpenFont(font_path, body_px);
+  TTF_Font *f_small = TTF_OpenFont(font_path, small_px);
+  TTF_Font *f_eta   = TTF_OpenFont(font_path, eta_px);
+
+  if(!f_title || !f_route || !f_body || !f_small || !f_eta){
+    log_msg("ERROR: TTF_OpenFont failed. FONT_PATH=%s", font_path);
+    log_msg("TTF error: %s", TTF_GetError());
+    if(f_title) TTF_CloseFont(f_title);
+    if(f_route) TTF_CloseFont(f_route);
+    if(f_body)  TTF_CloseFont(f_body);
+    if(f_small) TTF_CloseFont(f_small);
+    if(f_eta)   TTF_CloseFont(f_eta);
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    TTF_Quit(); SDL_Quit();
+    return 1;
+  }
+
+  log_msg("Font px: title=%d route=%d body=%d small=%d eta=%d", title_px, route_px, body_px, small_px, eta_px);
+
+  // Colors
+  SDL_Color white = {245,245,245,255};
+  SDL_Color dim   = {190,190,190,255};
+  SDL_Color dark  = {20,20,26,255};
+  SDL_Color tile  = {55,55,65,230};
+  SDL_Color border= {120,120,135,255};
+  SDL_Color accent= {90,160,255,255};
+
+  // Layout
+  const int PAD = (H >= 2000) ? 22 : 12;
+  const int GAP = (H >= 2000) ? 14 : 8;
+
+  const int COLS = 2;
+  const int ROWS = 6;
+  const int MAX_SHOW = 12;
+
+  time_t last_fetch = 0;
+  Arrival *arrivals = NULL;
+  int n_arr = 0;
+  char stop_name[96] = "";
+  bool have_stop_name = false;
+
+  // Cache header strings
+  char last_header_right[64] = "";
+  char last_header_left[256] = "";
+
+  while(!g_quit){
+    SDL_Event e;
+    while(SDL_PollEvent(&e)){
+      if(e.type == SDL_QUIT) g_quit = 1;
+      if(e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE) g_quit = 1;
+    }
+
+    time_t now = time(NULL);
+
+    // Fetch on schedule
+    if(now - last_fetch >= poll_seconds || last_fetch == 0){
+      last_fetch = now;
+
+      char url[512];
+      snprintf(url, sizeof(url),
+        "https://bustime.mta.info/api/siri/stop-monitoring.json?key=%s&version=2&OperatorRef=MTA&MonitoringRef=%s&MaximumStopVisits=60&StopMonitoringDetailLevel=normal",
+        mta_key, stop_id);
+
+      MemBuf body;
+      long code=0;
+      int rc = http_get(url, &body, &code);
+      if(rc == 0){
+        log_msg("FETCH stop=%s HTTP %ld bytes=%zu", stop_id, code, body.size);
+        if(code == 200 && body.data && body.size > 0){
+          if(arrivals){ free(arrivals); arrivals=NULL; n_arr=0; }
+
+          Arrival *tmp=NULL; int tmpn=0;
+          int pn = parse_arrivals(body.data, &tmp, &tmpn, stop_ref, route_filter, lookahead_sec, now);
+          if(pn >= 0){
+            arrivals = tmp;
+            n_arr = tmpn;
+            if(n_arr > 0 && !have_stop_name){
+              // first arrival likely contains stop name; keep it
+              if(tmp[0].stopname[0]){
+                snprintf(stop_name, sizeof(stop_name), "%s", tmp[0].stopname);
+                have_stop_name = true;
+              }
+            }
+            log_msg("PARSE: kept %d arrivals (lookahead=%d min, filter='%s')", n_arr, lookahead_min, route_filter);
+          } else {
+            log_msg("PARSE: error");
+            if(tmp) free(tmp);
+          }
+        }
+      }
+      if(body.data) free(body.data);
+    }
+
+    // Build header strings
+    struct tm lt; localtime_r(&now, &lt);
+    char timestr[64];
+    strftime(timestr, sizeof(timestr), "%a %b %d  %I:%M %p", &lt);
+
+    char right[128];
+    snprintf(right, sizeof(right), "%s", timestr);
+
+    char title[256];
+    if(have_stop_name && stop_name[0]){
+      snprintf(title, sizeof(title), "Stop %s — %s", stop_id, stop_name);
+    } else {
+      snprintf(title, sizeof(title), "Stop %s", stop_id);
+    }
+    if(route_filter && *route_filter){
+      char tmp[320];
+      snprintf(tmp, sizeof(tmp), "%s   (Route: %s)", title, route_filter);
+      snprintf(title, sizeof(title), "%s", tmp);
+    }
+
+    // Render full frame (single present to avoid “flashing”)
+    SDL_SetRenderDrawColor(ren, dark.r, dark.g, dark.b, 255);
+    SDL_RenderClear(ren);
+
+    // Header
+    Tex t_title = make_text(ren, f_title, white, title);
+    Tex t_right = make_text(ren, f_small, dim, right);
+    draw_tex(ren, t_title, PAD, PAD);
+    draw_tex(ren, t_right, W - PAD - t_right.w, PAD + (t_title.h - t_right.h)/2);
+
+    int header_h = PAD + t_title.h + PAD;
+    tex_destroy(&t_title);
+    tex_destroy(&t_right);
+
+    // Tiles area starts immediately after header with a small gap
+    int top = header_h + (GAP/2);
+
+    int usable_h = H - top - PAD;
+    int usable_w = W - (PAD*2);
+    int col_w = (usable_w - GAP) / COLS;
+    int row_h = (usable_h - (GAP * (ROWS-1))) / ROWS;
+    if(row_h < 10) row_h = 10;
+
+    int show = n_arr;
+    if(show > MAX_SHOW) show = MAX_SHOW;
+
+    if(show <= 0){
+      SDL_Rect msg = { PAD + (usable_w/4), top + (usable_h/3), usable_w/2, row_h*2 };
+      draw_box(ren, msg, (SDL_Color){70,70,80,230}, border);
+      Tex t = make_text(ren, f_body, white, "No upcoming arrivals to display");
+      draw_tex(ren, t, msg.x + (msg.w - t.w)/2, msg.y + (msg.h - t.h)/2);
+      tex_destroy(&t);
+
+      SDL_RenderPresent(ren);
+      SDL_Delay(50);
+      continue;
+    }
+
+    for(int idx=0; idx<show; idx++){
+      Arrival *a = &arrivals[idx];
+
+      int col = idx / ROWS;
+      int row = idx % ROWS;
+      int x = PAD + col*(col_w + GAP);
+      int y = top + row*(row_h + GAP);
+
+      SDL_Rect rc = { x, y, col_w, row_h };
+      draw_box(ren, rc, tile, border);
+
+      // ETA (minutes-only) on the right side, big
+      char etabuf[16];
+      fmt_eta(a->eta_sec, etabuf, sizeof(etabuf));
+      Tex t_eta = make_text(ren, f_eta, white, etabuf);
+
+      int right_pad = 14;
+      int eta_x = rc.x + rc.w - right_pad - t_eta.w;
+      int eta_y = rc.y + (rc.h - t_eta.h)/2;
+      draw_tex(ren, t_eta, eta_x, eta_y);
+      tex_destroy(&t_eta);
+
+      // Route + vehicle on left, top line
+      char linebuf[96];
+      if(a->veh[0] && strcmp(a->veh, "?")!=0) snprintf(linebuf, sizeof(linebuf), "%s  #%s", a->line, a->veh);
+      else snprintf(linebuf, sizeof(linebuf), "%s", a->line);
+
+      Tex t_line = make_text(ren, f_route, accent, linebuf);
+      int left_x = rc.x + 14;
+      int cur_y = rc.y + 10;
+      draw_tex(ren, t_line, left_x, cur_y);
+      cur_y += t_line.h + 6;
+      tex_destroy(&t_line);
+
+      // Destination (truncate visually by letting SDL clip naturally)
+      Tex t_dest = make_text(ren, f_body, white, a->dest[0] ? a->dest : "");
+      draw_tex(ren, t_dest, left_x, cur_y);
+      cur_y += t_dest.h + 6;
+      tex_destroy(&t_dest);
+
+      // Distance + stops line
+      char ds[128];
+      fmt_dist_stops(a, ds, sizeof(ds));
+
+      // LIVE/SCHED + distance
+      char smallbuf[200];
+      if(ds[0]) snprintf(smallbuf, sizeof(smallbuf), "%s | %s", a->live_label, ds);
+      else snprintf(smallbuf, sizeof(smallbuf), "%s", a->live_label);
+
+      Tex t_small = make_text(ren, f_small, dim, smallbuf);
+      // place at bottom-left within tile (tight, no wasted space)
+      int bottom_y = rc.y + rc.h - 10 - t_small.h;
+      draw_tex(ren, t_small, left_x, bottom_y);
+      tex_destroy(&t_small);
+    }
+
+    SDL_RenderPresent(ren);
+    SDL_Delay(33); // ~30fps
+  }
+
+  if(arrivals) free(arrivals);
+
+  TTF_CloseFont(f_title);
+  TTF_CloseFont(f_route);
+  TTF_CloseFont(f_body);
+  TTF_CloseFont(f_small);
+  TTF_CloseFont(f_eta);
+
+  SDL_DestroyRenderer(ren);
+  SDL_DestroyWindow(win);
+
+  TTF_Quit();
+  SDL_Quit();
+  return 0;
+}

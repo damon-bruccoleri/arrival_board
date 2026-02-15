@@ -1,0 +1,14 @@
++ cd /home/damon/arrival_board
++ export MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
++ export STOP_ID=501627
++ export ROUTE_FILTER=
++ export POLL_SECONDS=10
++ export SDL_VIDEODRIVER=x11
++ export SDL_RENDER_DRIVER=software
++ export APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
++ export SOUND_NEW=/home/damon/beep_new.wav
++ export SOUND_ARRIVE=/home/damon/beep_arrive.wav
++ sleep 1
++ aplay -q -D hdmi:CARD=vc4hdmi0,DEV=0 /home/damon/beep_new.wav
++ ./arrival_board
+Renderer size 3840x2160
