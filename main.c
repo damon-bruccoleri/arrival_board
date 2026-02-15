@@ -629,18 +629,19 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
          * screen: x = fx*W, y = body_y + fy*body_h. */
         const float exhaust_img_x[STEAM_PUFFS] = { 0.22f, 0.45f, 0.55f, 0.78f };
         const float exhaust_img_y[STEAM_PUFFS] = { 0.88f, 0.85f, 0.85f, 0.88f };
-        const float rise_speed = 0.22f;   /* slow drift up */
-        const float fade_speed = 0.28f;   /* fade out slowly so they drift longer */
+        const float rise_speed = 4.4f;    /* drift up (2x faster again) */
+        const float fade_speed = 0.28f;   /* fade out as they drift */
         const float scale_grow = 0.0012f;
         const float puff_size_mult = 2.f;  /* puffs 2x larger */
+        const float start_alpha = 64.f;    /* 25% opacity */
 
         if(!init){
             for(int i = 0; i < STEAM_PUFFS; i++){
                 puffs[i].x = (float)W * exhaust_img_x[i];
                 puffs[i].y = (float)body_y + (float)body_h * exhaust_img_y[i];
-                puffs[i].alpha = 200.f;
+                puffs[i].alpha = start_alpha;
                 puffs[i].scale = 0.7f + (float)(i % 3) * 0.1f;
-                puffs[i].rise = rise_speed + (float)(i % 2) * 0.06f;
+                puffs[i].rise = rise_speed + (float)(i % 2) * 1.2f;
             }
             init = 1;
         }
@@ -657,9 +658,9 @@ static void render_ui(SDL_Renderer *r, Fonts *f,
                 float ex_y = (float)body_y + (float)body_h * exhaust_img_y[i];
                 puffs[i].x = ex_x + (float)((i * 17) % 21 - 10);
                 puffs[i].y = ex_y + (float)((i * 11) % 12);
-                puffs[i].alpha = 220.f;
+                puffs[i].alpha = start_alpha;
                 puffs[i].scale = 0.6f + (float)(i % 3) * 0.1f;
-                puffs[i].rise = rise_speed + (float)(i % 2) * 0.05f;
+                puffs[i].rise = rise_speed + (float)(i % 2) * 1.0f;
             }
 
             int a = (int)puffs[i].alpha;
