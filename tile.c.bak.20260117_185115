@@ -4,7 +4,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
-#include <stdint.h>
 
 static void fill_rect(SDL_Renderer *ren, SDL_Rect r, SDL_Color c){
   SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a);
@@ -104,9 +103,7 @@ static bool is_no_destination(const char *dest){
 }
 
 static void append_sep(char *dst, size_t dstsz, const char *sep, const char *s){
-  if (!dst || dstsz == 0 || !s) return;
-  if ((uintptr_t)s < 4096) return;  // guard against invalid tiny pointers
-  if (!*s) return;
+  if (!dst || dstsz == 0 || !s || !*s) return;
   if (dst[0]) strncat(dst, sep, dstsz - strlen(dst) - 1);
   strncat(dst, s, dstsz - strlen(dst) - 1);
 }
@@ -123,6 +120,7 @@ void render_tile(SDL_Renderer *ren,
                  const char *eta_big,
                  const char *eta_suffix,
                  const char *dist_line,
+                 const char *veh_line,
                  bool realtime)
 {
   SDL_Color bg     = { 28, 30, 38, 255 };
@@ -234,6 +232,7 @@ void render_tile(SDL_Renderer *ren,
 
   // Put bus info after distance using dot separator (caller can include pax after bus too)
   // Example desired: "2 stops • 0.5 mi • Bus 8838 • 23 pax"
+  append_sep(bottom, sizeof(bottom), " • ", veh_line);
 
   if (bottom[0]) {
     int bot_w=0, bot_h=0;

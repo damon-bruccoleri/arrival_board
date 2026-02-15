@@ -1,14 +1,103 @@
++ [ -f /home/damon/arrival_board/arrival_board.env ]
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
++ STOP_ID=501627
++ ROUTE_FILTER=
++ POLL_SECONDS=10
++ SDL_VIDEODRIVER=x11
++ SDL_RENDER_DRIVER=software
++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
++ SOUND_NEW=/home/damon/beep_new.wav
++ SOUND_ARRIVE=/home/damon/beep_arrive.wav
++ set +a
++ openbox-session
++ xrandr
++ awk / connected/{print $1; exit}
++ OUT=HDMI-1
++ [ -n HDMI-1 ]
++ xrandr --output HDMI-1 --auto --primary
++ xrandr --output HDMI-1 --mode 1920x1080 --rate 60 --primary
++ xrandr
++ grep -q ^[[:space:]]*3840x2160
++ xrandr --output HDMI-1 --mode 3840x2160 --rate 30 --primary
 + cd /home/damon/arrival_board
-+ export MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
-+ export STOP_ID=501627
-+ export ROUTE_FILTER=
-+ export POLL_SECONDS=10
-+ export SDL_VIDEODRIVER=x11
-+ export SDL_RENDER_DRIVER=software
-+ export APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
-+ export SOUND_NEW=/home/damon/beep_new.wav
-+ export SOUND_ARRIVE=/home/damon/beep_arrive.wav
++ exec /home/damon/arrival_board/run_arrival_board.sh
++ cd /home/damon/arrival_board
++ [ -f /home/damon/arrival_board/arrival_board.env ]
++ set -a
++ . /home/damon/arrival_board/arrival_board.env
++ MTA_KEY=349ca6a7-7302-4d1d-8032-61a69ed536d7
++ STOP_ID=501627
++ ROUTE_FILTER=
++ POLL_SECONDS=10
++ SDL_VIDEODRIVER=x11
++ SDL_RENDER_DRIVER=software
++ FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
++ APLAY_DEVICE=hdmi:CARD=vc4hdmi0,DEV=0
++ SOUND_NEW=/home/damon/beep_new.wav
++ SOUND_ARRIVE=/home/damon/beep_arrive.wav
++ set +a
++ date
++ echo ---- run_arrival_board.sh start Sat 17 Jan 18:51:53 EST 2026 ----
+---- run_arrival_board.sh start Sat 17 Jan 18:51:53 EST 2026 ----
++ [ -n 349ca6a7-7302-4d1d-8032-61a69ed536d7 ]
++ echo MTA_KEY=set
+MTA_KEY=set
++ echo STOP_ID=501627  POLL_SECONDS=10
+STOP_ID=501627  POLL_SECONDS=10
++ echo SDL_VIDEODRIVER=x11  SDL_RENDER_DRIVER=software
+SDL_VIDEODRIVER=x11  SDL_RENDER_DRIVER=software
++ echo FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
+FONT_PATH=/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
++ [ -n hdmi:CARD=vc4hdmi0,DEV=0 ]
++ [ -n /home/damon/beep_new.wav ]
++ [ -f /home/damon/beep_new.wav ]
 + sleep 1
+Openbox-Message: Unable to find a valid menu file "/var/lib/openbox/debian-menu.xml"
 + aplay -q -D hdmi:CARD=vc4hdmi0,DEV=0 /home/damon/beep_new.wav
++ :
++ date
++ echo ---- starting arrival_board Sat 17 Jan 18:51:54 EST 2026 ----
+---- starting arrival_board Sat 17 Jan 18:51:54 EST 2026 ----
 + ./arrival_board
+BUILD_TAG=AB_SPLIT_STABLE_2026-01-17
 Renderer size 3840x2160
+Font px: header_title=86 header_sub=69 route=73 dest=62 eta=146 small=51
+FETCH stop=501627 HTTP 200 bytes=14449
+PARSE: kept 9 arrivals
+FETCH stop=501627 HTTP 200 bytes=14447
+PARSE: kept 9 arrivals
+FETCH stop=501627 HTTP 200 bytes=14442
+PARSE: kept 9 arrivals
+FETCH stop=501627 HTTP 200 bytes=14442
+PARSE: kept 9 arrivals
+FETCH stop=501627 HTTP 200 bytes=15775
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15783
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15783
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15783
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15782
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15781
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15780
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15775
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15776
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15776
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15775
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=15774
+PARSE: kept 10 arrivals
+FETCH stop=501627 HTTP 200 bytes=16830
+PARSE: kept 11 arrivals
+FETCH stop=501627 HTTP 200 bytes=16835
+PARSE: kept 11 arrivals
