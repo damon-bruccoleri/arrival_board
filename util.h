@@ -1,6 +1,6 @@
 /*
  * Utility helpers: logging, HTTP, JSON accessors.
- * Used by main.c, mta.c, and weather.c.
+ * Used by main.c, mta.c, weather.c, ui.c.
  */
 #pragma once
 
@@ -9,6 +9,9 @@
 
 /* Clamp integer v to [lo, hi]. */
 int clampi(int v, int lo, int hi);
+
+/* Layout scale factor from reference height (LAYOUT_REF_HEIGHT). */
+float layout_scale(int screen_height);
 
 /* Log a line to stderr (printf-style). */
 void logf_(const char *fmt, ...);

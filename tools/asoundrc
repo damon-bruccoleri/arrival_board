@@ -1,0 +1,16 @@
+# ALSA config: dmix for HDMI so background music and flip sound can play together.
+# Install: ./tools/install_asoundrc.sh  (copies to ~/.asoundrc)
+
+pcm.hdmi_dmix {
+    type dmix
+    ipc_key 5678293
+    slave {
+        pcm "plughw:CARD=vc4hdmi0,DEV=0"
+        rate 48000
+    }
+}
+
+pcm.!default {
+    type plug
+    slave.pcm "hdmi_dmix"
+}

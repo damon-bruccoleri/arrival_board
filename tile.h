@@ -6,6 +6,7 @@ typedef struct Fonts {
     TTF_Font *h1;
     TTF_Font *h2;
     TTF_Font *tile_big;
+    TTF_Font *tile_big_bold;  /* bold variant for route styling */
     TTF_Font *tile_med;
     TTF_Font *tile_small;
 } Fonts;

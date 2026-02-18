@@ -15,20 +15,29 @@ CFLAGS += -DUSE_SDL_IMAGE
 LIBS += -lSDL2_image
 endif
 
-OBJS = main.o tile.o util.o mta.o weather.o
+OBJS = main.o audio.o tile.o texture.o ui.o util.o mta.o weather.o
 
 all: arrival_board
 
 arrival_board: $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
-main.o: main.c tile.h types.h util.h mta.h weather.h
+main.o: main.c audio.h mta.h tile.h texture.h types.h ui.h util.h weather.h
 	$(CC) $(CFLAGS) -c -o $@ main.c
+
+audio.o: audio.c audio.h types.h
+	$(CC) $(CFLAGS) -c -o $@ audio.c
 
 tile.o: tile.c tile.h util.h
 	$(CC) $(CFLAGS) -c -o $@ tile.c
 
-util.o: util.c util.h
+texture.o: texture.c texture.h util.h
+	$(CC) $(CFLAGS) -c -o $@ texture.c
+
+ui.o: ui.c ui.h texture.h tile.h types.h util.h
+	$(CC) $(CFLAGS) -c -o $@ ui.c
+
+util.o: util.c util.h types.h
 	$(CC) $(CFLAGS) -c -o $@ util.c
 
 mta.o: mta.c mta.h types.h util.h

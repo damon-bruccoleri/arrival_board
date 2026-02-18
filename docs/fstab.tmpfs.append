@@ -1,0 +1,8 @@
+# Append these lines to /etc/fstab for arrival_board hardening (reduces SD writes).
+# Backup first: sudo cp /etc/fstab /etc/fstab.bak
+# Add with: sudo tee -a /etc/fstab < docs/fstab.tmpfs.append
+#
+# tmpfs for arrival_board hardening
+tmpfs    /tmp                    tmpfs    defaults,noatime,mode=1777,size=64M    0  0
+tmpfs    /var/log                tmpfs    defaults,noatime,mode=0755,size=32M    0  0
+tmpfs    /var/run                tmpfs    defaults,noatime,mode=0755,size=8M     0  0

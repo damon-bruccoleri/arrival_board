@@ -2,6 +2,7 @@
  * Utility implementation: logging, HTTP, JSON accessors.
  */
 #include "util.h"
+#include "types.h"
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,6 +10,10 @@
 
 int clampi(int v, int lo, int hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
+}
+
+float layout_scale(int screen_height) {
+    return (screen_height > 0) ? ((float)screen_height / (float)LAYOUT_REF_HEIGHT) : 1.0f;
 }
 
 void logf_(const char *fmt, ...) {

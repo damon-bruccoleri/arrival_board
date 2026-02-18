@@ -5,6 +5,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Derive bold font path: "Foo.ttf" -> "Foo-Bold.ttf" */
+static void font_path_bold(const char *path, char *out, size_t outsz) {
+    size_t len = strlen(path);
+    if (len >= 4 && outsz > len + 5) {
+        const char *ext = path + len - 4;
+        if (ext[0] == '.' && ext[1] == 't' && ext[2] == 't' && ext[3] == 'f') {
+            size_t prefix = len - 4;
+            snprintf(out, outsz, "%.*s-Bold.ttf", (int)prefix, path);
+            return;
+        }
+    }
+    snprintf(out, outsz, "%s", path);
+}
+
 static SDL_Texture* tex_from_text(SDL_Renderer *r, TTF_Font *font, const char *utf8, SDL_Color c,
                                   int *outw, int *outh) {
     if(!utf8) utf8 = "";
@@ -43,19 +57,25 @@ int tile_load_fonts(Fonts *f, const char *font_path, int screen_h) {
     tm = clampi(tm, 22, 130);
     ts = clampi(ts, 18, 100);
 
+    char bold_path[512];
+    font_path_bold(font_path, bold_path, sizeof(bold_path));
+
     f->h1 = TTF_OpenFont(font_path, h1);
     f->h2 = TTF_OpenFont(font_path, h2);
-    f->tile_big   = TTF_OpenFont(font_path, tb);
-    f->tile_med   = TTF_OpenFont(font_path, tm);
-    f->tile_small = TTF_OpenFont(font_path, ts);
+    f->tile_big      = TTF_OpenFont(font_path, tb);
+    f->tile_big_bold = TTF_OpenFont(bold_path, tb);
+    f->tile_med      = TTF_OpenFont(font_path, tm);
+    f->tile_small    = TTF_OpenFont(font_path, ts);
 
     if(!f->h1 || !f->h2 || !f->tile_big || !f->tile_med || !f->tile_small) {
         return -1;
     }
+    if (!f->tile_big_bold) f->tile_big_bold = f->tile_big;  /* fallback to regular */
 
     TTF_SetFontHinting(f->h1, TTF_HINTING_LIGHT);
     TTF_SetFontHinting(f->h2, TTF_HINTING_LIGHT);
     TTF_SetFontHinting(f->tile_big, TTF_HINTING_LIGHT);
+    if (f->tile_big_bold != f->tile_big) TTF_SetFontHinting(f->tile_big_bold, TTF_HINTING_LIGHT);
     TTF_SetFontHinting(f->tile_med, TTF_HINTING_LIGHT);
     TTF_SetFontHinting(f->tile_small, TTF_HINTING_LIGHT);
     return 0;
@@ -66,6 +86,7 @@ void tile_free_fonts(Fonts *f){
     if(f->h1) TTF_CloseFont(f->h1);
     if(f->h2) TTF_CloseFont(f->h2);
     if(f->tile_big) TTF_CloseFont(f->tile_big);
+    if(f->tile_big_bold && f->tile_big_bold != f->tile_big) TTF_CloseFont(f->tile_big_bold);
     if(f->tile_med) TTF_CloseFont(f->tile_med);
     if(f->tile_small) TTF_CloseFont(f->tile_small);
     memset(f, 0, sizeof(*f));
