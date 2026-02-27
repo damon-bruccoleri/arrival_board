@@ -59,7 +59,12 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    SDL_Renderer *r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    Uint32 rflags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC;
+    SDL_Renderer *r = SDL_CreateRenderer(win, -1, rflags);
+    if (!r) {
+        logf_("CreateRenderer accelerated failed: %s; falling back to software", SDL_GetError());
+        r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
+    }
     if (!r) {
         logf_("CreateRenderer failed: %s", SDL_GetError());
         SDL_DestroyWindow(win);
@@ -199,7 +204,7 @@ int main(int argc, char **argv) {
                   arrivals, n, scheduled, n_scheduled,
                   bg_tex, steam_tex, logo_tex, symbol_font);
 
-        SDL_Delay(80);
+        SDL_Delay(16);
     }
 
 done:

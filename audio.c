@@ -167,107 +167,60 @@ void audio_start_music(const char *music_path, const char *music_loop2, const ch
 
     int audio_debug = (getenv("AUDIO_DEBUG") != NULL);
     int use_pulse = (!aplay_device || !aplay_device[0]);
-    const char *play_path = music_path;
     mixed_path_buf[0] = '\0';
     ferry_pid = -1;
 
-    /* Pre-mix music + ferry into one file so one stream plays continuously (music never stops). */
+    /* Total cycle length 23s (music + gap). Ferry every 5th cycle. */
+    int music_sec = 23;
+    const char *env_music = getenv("MUSIC_DURATION_SEC");
+    if (env_music && *env_music) {
+        int v = atoi(env_music);
+        if (v > 0) music_sec = v;
+    }
+    int delay_sec = music_sec * 4;    /* first ferry at start of 5th loop */
+    int interval_sec = music_sec * 5; /* then every 5 loops */
+
+    /* Actual file length: for gap so each loop = music_sec. If header wrong, use MUSIC_FILE_SEC or 21. */
+    int file_sec = audio_wav_duration_seconds(music_path);
+    if (file_sec <= 0 || file_sec > 300) {
+        const char *env_file = getenv("MUSIC_FILE_SEC");
+        if (env_file && *env_file) { int v = atoi(env_file); if (v > 0) file_sec = v; }
+        else file_sec = 21;
+    }
+    int gap_sec = music_sec - file_sec;
+    if (gap_sec < 0) gap_sec = 0;
+
     if (music_loop2 && music_loop2[0]) {
-        int music_sec = audio_wav_duration_seconds(music_path);
-        int ferry_sec = audio_wav_duration_seconds(music_loop2);
-        const char *env_music = getenv("MUSIC_DURATION_SEC");
-        const char *env_ferry = getenv("FERRY_DURATION_SEC");
-        if (env_music && *env_music) { int v = atoi(env_music); if (v > 0) music_sec = v; }
-        if (env_ferry && *env_ferry) { int v = atoi(env_ferry); if (v >= 0) ferry_sec = v; }
-        if (ferry_sec < 0) ferry_sec = 5; /* .mp3 or other format: assume ~5s if not set via env */
-        if (music_sec > 0 && ferry_sec >= 0) {
-            /* Ferry at end of music only: pad ferry with (music_len - ferry_len) sec so it overlays the last ferry_len sec. */
-            int delay_sec = music_sec - ferry_sec;
-            if (delay_sec < 0) delay_sec = 0;
-            snprintf(mixed_path_buf, sizeof(mixed_path_buf), "/tmp/arrival_board_mixed_%d.wav", (int)getpid());
-            char delay_buf[16];
-            snprintf(delay_buf, sizeof(delay_buf), "%d", delay_sec);
-            /* Normalize ferry to 48kHz 16-bit stereo for compatibility (Pi/sox). */
-            char ferry_norm_buf[512];
-            snprintf(ferry_norm_buf, sizeof(ferry_norm_buf), "/tmp/arrival_board_ferry_%d.wav", (int)getpid());
-            const char *ferry_for_mix = music_loop2;
-            pid_t norm_pid = fork();
-            if (norm_pid == 0) {
-                (void)freopen("/dev/null", "r", stdin);
-                (void)freopen("/dev/null", "w", stdout);
-                if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
+        char delay_buf[16], interval_buf[16];
+        snprintf(delay_buf, sizeof(delay_buf), "%d", delay_sec);
+        snprintf(interval_buf, sizeof(interval_buf), "%d", interval_sec);
+        ferry_pid = fork();
+        if (ferry_pid == 0) {
+            setsid();
+            (void)freopen("/dev/null", "r", stdin);
+            (void)freopen("/dev/null", "w", stdout);
+            if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
+            if (use_pulse)
                 execl("/bin/sh", "sh", "-c",
-                      "command -v sox >/dev/null 2>&1 && sox \"$1\" -r 48000 -c 2 -b 16 \"$2\"",
-                      "sh", music_loop2, ferry_norm_buf, (char *)NULL);
-                _exit(1);
-            }
-            if (norm_pid > 0) {
-                int st;
-                while (waitpid(norm_pid, &st, 0) < 0 && errno == EINTR) { }
-                if (WIFEXITED(st) && WEXITSTATUS(st) == 0) {
-                    struct stat sb;
-                    if (stat(ferry_norm_buf, &sb) == 0)
-                        ferry_for_mix = ferry_norm_buf;
-                }
-            }
-            /* Mix full music with ferry over the last ferry_sec: pad ferry with delay_sec, then mix (output = full music length). */
-            pid_t sox_pid = fork();
-            if (sox_pid == 0) {
-                (void)freopen("/dev/null", "r", stdin);
-                (void)freopen("/dev/null", "w", stdout);
-                if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
-                /* Boost ferry -v 4.4, music -v 0.3 so it’s audible over the music */
+                      "command -v paplay >/dev/null 2>&1 && sleep \"$1\" && while true; do paplay \"$2\" 2>/dev/null; sleep \"$3\"; done",
+                      "sh", delay_buf, music_loop2, interval_buf, (char *)NULL);
+            else
                 execl("/bin/sh", "sh", "-c",
-                      "command -v sox >/dev/null 2>&1 && sox \"$2\" -p pad \"$3\" 0 | sox -m -v 0.3 \"$1\" -v 4.4 - \"$4\"",
-                      "sh", music_path, ferry_for_mix, delay_buf, mixed_path_buf, (char *)NULL);
-                _exit(1);
-            }
-            if (sox_pid > 0) {
-                int st;
-                while (waitpid(sox_pid, &st, 0) < 0 && errno == EINTR) { }
-                if (WIFEXITED(st) && WEXITSTATUS(st) == 0) {
-                    struct stat sb;
-                    if (stat(mixed_path_buf, &sb) == 0) {
-                        play_path = mixed_path_buf;
-                        if (audio_debug) fprintf(stderr, "AUDIO_DEBUG: sox mix ok, ferry at end of loop\n");
-                    }
-                }
-                if (play_path != mixed_path_buf) {
-                    mixed_path_buf[0] = '\0';
-                    if (audio_debug) fprintf(stderr, "AUDIO_DEBUG: sox mix failed (sox exit %d), music only\n",
-                            sox_pid > 0 && WIFEXITED(st) ? WEXITSTATUS(st) : -1);
-                }
-            }
-            if (ferry_for_mix == ferry_norm_buf)
-                (void)unlink(ferry_norm_buf);
+                      "sleep \"$1\" && while true; do aplay -q -D \"$2\" \"$3\" 2>/dev/null; sleep \"$4\"; done",
+                      "sh", delay_buf, aplay_device, music_loop2, interval_buf, (char *)NULL);
+            _exit(127);
         }
+        if (ferry_pid < 0) ferry_pid = -1;
+        else if (audio_debug)
+            fprintf(stderr, "AUDIO_DEBUG: ferry overlay every 5 loops (first at %ds, then every %ds)\n", delay_sec, interval_sec);
     }
 
-    /* If no pre-mixed file, use separate ferry process on Pulse only. */
-    int ferry_mix = use_pulse && music_loop2 && music_loop2[0] && play_path == music_path;
-    if (ferry_mix) {
-        int music_sec = audio_wav_duration_seconds(music_path);
-        int ferry_sec = audio_wav_duration_seconds(music_loop2);
-        if (music_sec > 0 && ferry_sec >= 0) {
-            int delay_sec = music_sec - ferry_sec;
-            if (delay_sec < 0) delay_sec = 0;
-            char delay_buf[16];
-            snprintf(delay_buf, sizeof(delay_buf), "%d", delay_sec);
-            ferry_pid = fork();
-            if (ferry_pid == 0) {
-                setsid();
-                (void)freopen("/dev/null", "r", stdin);
-                (void)freopen("/dev/null", "w", stdout);
-                if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
-                execl("/bin/sh", "sh", "-c",
-                      "command -v paplay >/dev/null 2>&1 && while true; do sleep \"$1\"; paplay \"$2\" 2>/dev/null; done",
-                      "sh", delay_buf, music_loop2, (char *)NULL);
-                _exit(127);
-            }
-            if (ferry_pid < 0) ferry_pid = -1;
-        }
-    }
+    char gap_buf[16];
+    snprintf(gap_buf, sizeof(gap_buf), "%d", gap_sec);
+    if (audio_debug)
+        fprintf(stderr, "AUDIO_DEBUG: cycle=%ds file~%ds gap=%ds\n", music_sec, file_sec, gap_sec);
 
+    /* Music: play file then gap so each cycle = music_sec. Never stop. */
     pid_t pid = fork();
     if (pid < 0) return;
     if (pid == 0) {
@@ -278,30 +231,21 @@ void audio_start_music(const char *music_path, const char *music_loop2, const ch
         if (use_pulse) {
             if (audio_debug)
                 execl("/bin/sh", "sh", "-c",
-                      "command -v paplay >/dev/null 2>&1 && while true; do paplay \"$1\"; done",
-                      "sh", play_path, (char *)NULL);
+                      "command -v paplay >/dev/null 2>&1 && while true; do paplay \"$1\"; sleep \"$2\"; done",
+                      "sh", music_path, gap_buf, (char *)NULL);
             else
                 execl("/bin/sh", "sh", "-c",
-                      "command -v paplay >/dev/null 2>&1 && while true; do paplay \"$1\" 2>/dev/null; done",
-                      "sh", play_path, (char *)NULL);
+                      "command -v paplay >/dev/null 2>&1 && while true; do paplay \"$1\" 2>/dev/null; sleep \"$2\"; done",
+                      "sh", music_path, gap_buf, (char *)NULL);
         } else {
-            /* ALSA: play_path is mixed file (ferry mixed in) or music only. Never play ferry in sequence. */
-            if (play_path != music_path) {
-                if (audio_debug)
-                    execl("/bin/sh", "sh", "-c",
-                          "while true; do aplay -q -D \"$1\" \"$2\"; done",
-                          "sh", aplay_device, play_path, (char *)NULL);
-                else
-                    execl("/bin/sh", "sh", "-c",
-                          "while true; do aplay -q -D \"$1\" \"$2\" 2>/dev/null; done",
-                          "sh", aplay_device, play_path, (char *)NULL);
-            } else {
+            if (audio_debug)
                 execl("/bin/sh", "sh", "-c",
-                      "command -v sox >/dev/null 2>&1 && "
-                      "while true; do sox -q -v 0.15 \"$1\" -t alsa \"$2\" 2>/dev/null || aplay -q -D \"$2\" \"$1\" 2>/dev/null; done || "
-                      "while true; do aplay -q -D \"$2\" \"$1\" 2>/dev/null; done",
-                      "sh", music_path, aplay_device, (char *)NULL);
-            }
+                      "while true; do aplay -q -D \"$1\" \"$2\"; sleep \"$3\"; done",
+                      "sh", aplay_device, music_path, gap_buf, (char *)NULL);
+            else
+                execl("/bin/sh", "sh", "-c",
+                      "while true; do aplay -q -D \"$1\" \"$2\" 2>/dev/null; sleep \"$3\"; done",
+                      "sh", aplay_device, music_path, gap_buf, (char *)NULL);
         }
         _exit(127);
     }
