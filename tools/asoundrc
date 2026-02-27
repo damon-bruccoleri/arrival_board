@@ -1,16 +1,38 @@
-# ALSA config: dmix for HDMI so background music and flip sound can play together.
-# Install: ./tools/install_asoundrc.sh  (copies to ~/.asoundrc)
+# ALSA config for Pi HDMI. Copy to ~/.asoundrc.
+# Use APLAY_DEVICE=dmix_hdmi or hdmi_mix so music and flip mix (no need to stop music for flip).
 
-pcm.hdmi_dmix {
+# Raw hw (single client only)
+pcm.direct_hdmi {
+    type plug
+    slave.pcm "hw:CARD=vc4hdmi0,DEV=0"
+}
+
+# Dmix: slave must match what vc4hdmi accepts (Pi often uses period 480, buffer 32768 at 48k).
+pcm.dmix_hdmi {
     type dmix
     ipc_key 5678293
     slave {
-        pcm "plughw:CARD=vc4hdmi0,DEV=0"
+        pcm "hw:CARD=vc4hdmi0,DEV=0"
         rate 48000
+        format S16_LE
+        period_size 480
+        buffer_size 32768
     }
 }
 
+# Plug in front so any format/rate is converted for dmix (use this as APLAY_DEVICE).
+pcm.hdmi_mix {
+    type plug
+    slave.pcm "dmix_hdmi"
+}
+
+ctl.dmix_hdmi {
+    type hw
+    card vc4hdmi0
+}
+
+# Default: use dmix so multiple apps can play. Set APLAY_DEVICE=hdmi_mix or dmix_hdmi.
 pcm.!default {
     type plug
-    slave.pcm "hdmi_dmix"
+    slave.pcm "dmix_hdmi"
 }

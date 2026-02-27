@@ -29,6 +29,15 @@ typedef struct Weather {
     double lat, lon;
 } Weather;
 
+/* One scheduled departure from GTFS (for routes with no real-time arrival). */
+typedef struct ScheduledDeparture {
+    char route[32];
+    char dest[128];     /* trip_headsign */
+    time_t when;        /* America/New_York */
+} ScheduledDeparture;
+
+#define SCHEDULED_MAX 24
+
 /* Grid layout: fixed columns and rows; only this many tiles are drawn. */
 #define TILE_COLS_FIXED  2
 #define TILE_ROWS_FIXED  6

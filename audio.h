@@ -1,18 +1,22 @@
 /*
- * Audio: background music (looped) and flip sound.
- * Uses aplay/sox; requires APLAY_DEVICE, SOUND_FLIP, MUSIC_FILE env.
+ * Audio: PipeWire/PulseAudio (paplay or libpulse) or ALSA (aplay).
+ * When aplay_device is NULL, uses paplay so music and flip mix. Otherwise aplay to raw device.
  */
 #pragma once
 
 #include "types.h"
 
-/* Start background music (loops); no-op if music_path or aplay_device empty. */
-void audio_start_music(const char *music_path, const char *aplay_device);
+/* Return WAV duration in seconds (from file header), or -1 on error. */
+int audio_wav_duration_seconds(const char *path);
+
+/* Start background music (loops). aplay_device NULL = use paplay; else aplay -D aplay_device.
+ * Ferry (music_loop2) on Pulse: mixed in at end of each loop; on ALSA: played after each loop. */
+void audio_start_music(const char *music_path, const char *music_loop2, const char *aplay_device);
 
 /* Stop background music. */
 void audio_stop_music(void);
 
-/* Play flip sound (non-blocking). */
+/* Play flip. With NULL device uses Pulse (mixes); with device uses ALSA (caller stops music first). */
 void audio_play_flip(const char *flip_path, const char *aplay_device);
 
 /* Return 1 if flip should play: new bus on board, or bus just arrived (mins->0). */

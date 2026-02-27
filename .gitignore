@@ -2,6 +2,9 @@
 arrival_board
 *.o
 
+# GTFS cache (downloaded at runtime)
+gtfs_bus_cache.zip
+
 # Environment (may contain secrets); use arrival_board.env.example as template
 arrival_board.env
 arrival_board.env.bak.*
@@ -25,6 +28,7 @@ startx.log
 
 # Stray debug / junk files
 last_beep_ms
+tools/Untitled
 
 # Editor / OS
 .DS_Store

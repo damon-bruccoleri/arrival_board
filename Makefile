@@ -15,18 +15,29 @@ CFLAGS += -DUSE_SDL_IMAGE
 LIBS += -lSDL2_image
 endif
 
-OBJS = main.o audio.o tile.o texture.o ui.o util.o mta.o weather.o
+ifneq ($(USE_PULSE),)
+CFLAGS += -DUSE_PULSE $(shell pkg-config --cflags libpulse 2>/dev/null || echo -I/usr/include)
+LIBS += $(shell pkg-config --libs libpulse-simple 2>/dev/null || echo -lpulse-simple -lpulse -pthread)
+endif
+
+OBJS = main.o audio.o config.o gtfs.o tile.o texture.o ui.o util.o mta.o weather.o
 
 all: arrival_board
 
 arrival_board: $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
-main.o: main.c audio.h mta.h tile.h texture.h types.h ui.h util.h weather.h
+main.o: main.c audio.h config.h gtfs.h mta.h tile.h texture.h types.h ui.h util.h weather.h
 	$(CC) $(CFLAGS) -c -o $@ main.c
 
 audio.o: audio.c audio.h types.h
 	$(CC) $(CFLAGS) -c -o $@ audio.c
+
+config.o: config.c config.h util.h
+	$(CC) $(CFLAGS) -c -o $@ config.c
+
+gtfs.o: gtfs.c gtfs.h types.h util.h
+	$(CC) $(CFLAGS) -c -o $@ gtfs.c
 
 tile.o: tile.c tile.h util.h
 	$(CC) $(CFLAGS) -c -o $@ tile.c

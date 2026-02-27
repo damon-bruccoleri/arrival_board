@@ -3,6 +3,8 @@
  * Build with: make [USE_SDL_IMAGE=1]. Config via environment (see arrival_board.env.example).
  */
 #include "audio.h"
+#include "config.h"
+#include "gtfs.h"
 #include "mta.h"
 #include "tile.h"
 #include "texture.h"
@@ -14,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifdef USE_SDL_IMAGE
@@ -24,27 +27,10 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    const char *font_path = getenv("FONT_PATH");
-    if (!font_path || !*font_path) font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+    if (!getenv("AUDIO_DEBUG")) setenv("AUDIO_DEBUG", "1", 0);
 
-    const char *mta_key = getenv("MTA_KEY");
-    const char *stop_id = getenv("STOP_ID");
-    const char *route_filter = getenv("ROUTE_FILTER");
-    int poll = 10;
-    const char *poll_s = getenv("POLL_SECONDS");
-    if (poll_s && *poll_s) poll = atoi(poll_s);
-    if (poll < 5) poll = 5;
-
-    int max_tiles = 12;
-    const char *max_s = getenv("MAX_TILES");
-    if (max_s && *max_s) max_tiles = atoi(max_s);
-    max_tiles = clampi(max_tiles, 1, 24);
-
-    char stop_name[256];
-    stop_name[0] = '\0';
-    const char *stop_name_override = getenv("STOP_NAME");
-    if (stop_name_override && *stop_name_override)
-        snprintf(stop_name, sizeof(stop_name), "%s", stop_name_override);
+    AppConfig cfg;
+    config_from_env(&cfg);
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER) != 0) {
         logf_("SDL_Init failed: %s", SDL_GetError());
@@ -92,8 +78,8 @@ int main(int argc, char **argv) {
 #endif
 
     Fonts fonts;
-    if (tile_load_fonts(&fonts, font_path, H) != 0) {
-        logf_("Failed to load font at %s", font_path);
+    if (tile_load_fonts(&fonts, cfg.font_path, H) != 0) {
+        logf_("Failed to load font at %s", cfg.font_path);
         SDL_DestroyRenderer(r);
         SDL_DestroyWindow(win);
         TTF_Quit();
@@ -101,11 +87,9 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    const char *symbol_font_path = getenv("SYMBOL_FONT_PATH");
-    if (!symbol_font_path || !*symbol_font_path) symbol_font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
     float sym_scale = layout_scale(H);
     int sym_pt = clampi((int)(58.f * sym_scale), 26, 120);
-    TTF_Font *symbol_font = TTF_OpenFont(symbol_font_path, sym_pt);
+    TTF_Font *symbol_font = TTF_OpenFont(cfg.symbol_font_path, sym_pt);
     if (!symbol_font) {
         const char *fallbacks[] = {
             "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
@@ -124,35 +108,32 @@ int main(int argc, char **argv) {
     Arrival arrivals[32];
     int n = 0;
     time_t last_fetch = 0;
+    time_t last_gtfs_load = 0;
     Arrival prev_arrivals[32];
     int n_prev = 0;
+    ScheduledDeparture scheduled[SCHEDULED_MAX];
+    int n_scheduled = 0;
 
-    /* Audio paths */
-    const char *aplay_dev = getenv("APLAY_DEVICE");
-    const char *music_env = getenv("MUSIC_FILE");
-    if (!music_env || !*music_env) music_env = getenv("BACKGROUND_MUSIC");
-    const char *flip_path = getenv("SOUND_FLIP");
-    char music_path[512], flip_path_buf[512];
-    music_path[0] = '\0';
-    flip_path_buf[0] = '\0';
-    if (music_env && *music_env) {
-        snprintf(music_path, sizeof(music_path), "%s", music_env);
-    } else if (getenv("HOME")) {
-        snprintf(music_path, sizeof(music_path), "%s/arrival_board/tools/Seaport_Steampunk_Final_Mix.wav", getenv("HOME"));
-        if (access(music_path, R_OK) != 0)
-            snprintf(music_path, sizeof(music_path), "tools/Seaport_Steampunk_Final_Mix.wav");
-    } else {
-        snprintf(music_path, sizeof(music_path), "tools/Seaport_Steampunk_Final_Mix.wav");
+    char stop_name[256];
+    stop_name[0] = '\0';
+    if (cfg.stop_name_override[0])
+        snprintf(stop_name, sizeof(stop_name), "%s", cfg.stop_name_override);
+
+    if (getenv("AUDIO_DEBUG")) {
+        fprintf(stderr, "AUDIO_DEBUG: music=%s\n", cfg.music_path[0] ? cfg.music_path : "(none)");
+        fprintf(stderr, "AUDIO_DEBUG: music_loop2=%s\n", cfg.music_loop2_path[0] ? cfg.music_loop2_path : "(none)");
+        fprintf(stderr, "AUDIO_DEBUG: flip=%s\n", cfg.flip_path[0] ? cfg.flip_path : "(none)");
+        fprintf(stderr, "AUDIO_DEBUG: device=%s\n", cfg.aplay_device[0] ? cfg.aplay_device : "(Pulse)");
     }
-    if (!flip_path || !*flip_path) {
-        if (getenv("HOME")) {
-            snprintf(flip_path_buf, sizeof(flip_path_buf), "%s/arrival_board/tools/flip.wav", getenv("HOME"));
-            if (access(flip_path_buf, R_OK) == 0) flip_path = flip_path_buf;
-        }
-        if ((!flip_path || !*flip_path) && access("tools/flip.wav", R_OK) == 0) flip_path = "tools/flip.wav";
-    }
-    if (aplay_dev && *aplay_dev && access(music_path, R_OK) == 0)
-        audio_start_music(music_path, aplay_dev);
+    if (access(cfg.music_path, R_OK) == 0)
+        audio_start_music(cfg.music_path,
+                          cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
+                          cfg.aplay_device[0] ? cfg.aplay_device : NULL);
+    else if (getenv("AUDIO_DEBUG"))
+        fprintf(stderr, "AUDIO_DEBUG: music file not found, skipping audio\n");
+
+    gtfs_load(cfg.gtfs_url, cfg.gtfs_cache);
+    last_gtfs_load = time(NULL);
 
     for (;;) {
         SDL_Event e;
@@ -163,22 +144,59 @@ int main(int argc, char **argv) {
         }
 
         time_t now = time(NULL);
-        if (!last_fetch || difftime(now, last_fetch) >= poll) {
+        if (!last_fetch || difftime(now, last_fetch) >= cfg.poll_seconds) {
             memcpy(prev_arrivals, arrivals, sizeof(prev_arrivals));
             n_prev = n;
             char sn[256];
             sn[0] = '\0';
-            n = fetch_mta_arrivals(arrivals, max_tiles, sn, sizeof(sn), mta_key, stop_id, route_filter);
+            n = fetch_mta_arrivals(arrivals, cfg.max_tiles, sn, sizeof(sn),
+                                   cfg.mta_key, cfg.stop_id,
+                                   cfg.route_filter[0] ? cfg.route_filter : NULL);
             if (!stop_name[0] && sn[0]) snprintf(stop_name, sizeof(stop_name), "%s", sn);
             fetch_weather(&wx, stop_name[0] ? stop_name : NULL);
-            if (n_prev > 0 && aplay_dev && *aplay_dev && flip_path && *flip_path &&
-                audio_should_play_flip(arrivals, n, prev_arrivals, n_prev))
-                audio_play_flip(flip_path, aplay_dev);
+
+            if (n_prev > 0 && cfg.flip_path[0] && audio_should_play_flip(arrivals, n, prev_arrivals, n_prev)) {
+                if (getenv("AUDIO_DEBUG"))
+                    fprintf(stderr, "AUDIO_DEBUG: trigger flip (board change)\n");
+                if (cfg.aplay_device[0]) {
+                    audio_stop_music();
+                    audio_play_flip(cfg.flip_path, cfg.aplay_device);
+                    if (access(cfg.music_path, R_OK) == 0)
+                        audio_start_music(cfg.music_path,
+                                          cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
+                                          cfg.aplay_device);
+                } else {
+                    audio_play_flip(cfg.flip_path, NULL);
+                }
+            }
             last_fetch = now;
+
+            mta_log_realtime_express_routes(arrivals, n);
+
+            n_scheduled = 0;
+            if (cfg.stop_id[0]) {
+                int nt = gtfs_next_departures(cfg.stop_id, NULL, scheduled, SCHEDULED_MAX);
+                int out = 0;
+                for (int i = 0; i < nt; i++) {
+                    int in_realtime = 0;
+                    for (int j = 0; j < n; j++)
+                        if (strcmp(scheduled[i].route, arrivals[j].route) == 0) { in_realtime = 1; break; }
+                    if (!in_realtime)
+                        scheduled[out++] = scheduled[i];
+                }
+                n_scheduled = out;
+            }
+        }
+
+        if (!last_gtfs_load || difftime(now, last_gtfs_load) >= 86400) {
+            gtfs_load(cfg.gtfs_url, cfg.gtfs_cache);
+            last_gtfs_load = now;
         }
 
         SDL_GetRendererOutputSize(r, &W, &H);
-        ui_render(r, &fonts, W, H, stop_id ? stop_id : "--", stop_name, &wx, arrivals, n,
+        ui_render(r, &fonts, W, H,
+                  cfg.stop_id[0] ? cfg.stop_id : "--", stop_name, &wx,
+                  arrivals, n, scheduled, n_scheduled,
                   bg_tex, steam_tex, logo_tex, symbol_font);
 
         SDL_Delay(80);

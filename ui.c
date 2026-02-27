@@ -31,6 +31,32 @@ typedef struct {
 #define EYE_ALPHA_LO      140
 #define EYE_ALPHA_HI      240
 
+/* Palette: distinct colors for route names. Same route => same color (real-time and scheduled). Regular and express share palette. */
+#define ROUTE_PALETTE_SIZE 48
+static const SDL_Color route_palette[ROUTE_PALETTE_SIZE] = {
+    { 255, 100, 100, 255 }, { 100, 180, 255, 255 }, { 100, 255, 140, 255 }, { 255, 200, 80,  255 },
+    { 200, 120, 255, 255 }, { 80,  255, 255, 255 }, { 255, 140, 200, 255 }, { 255, 220, 100, 255 },
+    { 140, 255, 180, 255 }, { 180, 140, 255, 255 }, { 255, 160, 100, 255 }, { 100, 220, 255, 255 },
+    { 220, 255, 140, 255 }, { 255, 120, 180, 255 }, { 160, 255, 220, 255 }, { 255, 180, 140, 255 },
+    { 200, 200, 255, 255 }, { 255, 255, 140, 255 }, { 180, 255, 200, 255 }, { 255, 140, 140, 255 },
+    { 120, 255, 120, 255 }, { 255, 100, 200, 255 }, { 100, 200, 255, 255 }, { 255, 200, 120, 255 },
+    { 200, 255, 100, 255 }, { 220, 180, 255, 255 }, { 255, 220, 180, 255 }, { 140, 255, 255, 255 },
+    { 255, 180, 220, 255 }, { 180, 255, 140, 255 }, { 255, 140, 255, 255 }, { 140, 200, 255, 255 },
+    { 255, 255, 100, 255 }, { 100, 255, 200, 255 }, { 255, 100, 140, 255 }, { 200, 255, 180, 255 },
+    { 160, 200, 255, 255 }, { 255, 200, 200, 255 }, { 200, 160, 255, 255 }, { 255, 160, 255, 255 },
+    { 120, 255, 200, 255 }, { 255, 120, 120, 255 }, { 180, 220, 255, 255 }, { 255, 180, 100, 255 },
+    { 220, 255, 220, 255 }, { 255, 100, 255, 255 }, { 100, 255, 100, 255 }, { 255, 220, 255, 255 },
+};
+
+static SDL_Color route_color_for(const char *route) {
+    if (!route || !route[0]) return (SDL_Color){ 255, 255, 255, 255 };
+    if (strcmp(route, "QM8") == 0) return (SDL_Color){ 200, 60, 60, 255 }; /* QM8: red */
+    unsigned hash = 5381u;
+    for (const unsigned char *p = (const unsigned char *)route; *p; p++)
+        hash = ((hash << 5u) + hash) + (unsigned)*p;
+    return route_palette[hash % ROUTE_PALETTE_SIZE];
+}
+
 static void draw_tile_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
                               SDL_Rect rect, float scale,
                               SDL_Color white, SDL_Color dim, int radius) {
@@ -62,16 +88,10 @@ static void draw_tile_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
     else if (a->mins > 0) snprintf(minsbuf, sizeof(minsbuf), "%d", a->mins);
     else snprintf(minsbuf, sizeof(minsbuf), "--");
 
-    SDL_Color route_color = white;
+    SDL_Color route_color = route_color_for(route);
     TTF_Font *route_font = f->tile_big;
-    if (strstr(route, "QM8 Super Express")) {
-        route_color = (SDL_Color){ 255, 60, 60, 255 };
-        route_font = f->tile_big_bold ? f->tile_big_bold : f->tile_big;
-    } else if (strstr(route, "QM8")) {
-        route_color = (SDL_Color){ 255, 60, 60, 255 };
-    } else if (strstr(route, "QM5")) {
-        route_color = (SDL_Color){ 60, 120, 255, 255 };
-    }
+    if (strstr(route, "QM8 Super Express") && f->tile_big_bold)
+        route_font = f->tile_big_bold;
 
     int eta_urgent = (a->mins >= 0 && a->mins <= 3);
     SDL_Color eta_color = eta_urgent ? (SDL_Color){ 255, 60, 60, 255 } : white;
@@ -278,8 +298,69 @@ static void draw_footer(SDL_Renderer *r, Fonts *f, int W, int H,
     draw_text(r, f->tile_small, copy_str, W / 2, H - pad - ch / 2, dim, 1);
 }
 
+/* Format scheduled when (America/New_York): today = "2:30 PM", tomorrow = "tomorrow 2:30 PM", else "Wed 2:30 PM". */
+static void format_scheduled_time(time_t when, char *buf, size_t bufsz) {
+    setenv("TZ", "America/New_York", 1);
+    tzset();
+    time_t now = time(NULL);
+    struct tm tm_when, tm_now;
+    localtime_r(&when, &tm_when);
+    localtime_r(&now, &tm_now);
+    int when_ymd = (tm_when.tm_year + 1900) * 10000 + (tm_when.tm_mon + 1) * 100 + tm_when.tm_mday;
+    int now_ymd = (tm_now.tm_year + 1900) * 10000 + (tm_now.tm_mon + 1) * 100 + tm_now.tm_mday;
+    time_t tomorrow_sec = now + 24 * 3600;
+    struct tm tm_tomorrow;
+    localtime_r(&tomorrow_sec, &tm_tomorrow);
+    int tomorrow_ymd = (tm_tomorrow.tm_year + 1900) * 10000 + (tm_tomorrow.tm_mon + 1) * 100 + tm_tomorrow.tm_mday;
+
+    char time_part[32];
+    strftime(time_part, sizeof(time_part), "%I:%M %p", &tm_when);
+    if (time_part[0] == '0') time_part[0] = ' ';
+
+    if (when_ymd == now_ymd) {
+        snprintf(buf, bufsz, "Scheduled %s", time_part);
+    } else if (when_ymd == tomorrow_ymd) {
+        snprintf(buf, bufsz, "Scheduled tomorrow %s", time_part);
+    } else {
+        char day[8];
+        strftime(day, sizeof(day), "%a", &tm_when);
+        snprintf(buf, bufsz, "Scheduled %s %s", day, time_part);
+    }
+}
+
+static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const ScheduledDeparture *s,
+                                        SDL_Rect rect, float scale, int radius) {
+    SDL_Color dim   = { 210, 210, 210, 255 };
+    int inner = clampi((int)(32 * scale), 12, 60);
+    int x = rect.x + inner;
+    int y = rect.y + clampi((int)(20 * scale), 8, 40);
+
+    SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
+    fill_round_rect(r, rect, radius);
+
+    const char *route = s->route[0] ? s->route : "--";
+    const char *dest  = s->dest[0]  ? s->dest  : "--";
+    SDL_Color route_color = route_color_for(route);
+    int route_w = 0;
+    text_size(f->tile_big, route, &route_w, NULL);
+    int line1_gap = clampi((int)(10 * scale), 6, 20);
+    int max_dest_w = rect.w - 2 * inner - route_w - line1_gap * 2;
+    if (max_dest_w < 40) max_dest_w = 40;
+
+    draw_text(r, f->tile_big, route, x, y, route_color, 0);
+    char dest_line[256];
+    snprintf(dest_line, sizeof(dest_line), " - %s", dest);
+    draw_text_trunc(r, f->tile_med, dest_line, x + route_w + line1_gap, y, max_dest_w, dim, 0);
+
+    char line2[128];
+    format_scheduled_time(s->when, line2, sizeof(line2));
+    int y2 = y + clampi((int)(120 * scale), 70, 190);
+    draw_text(r, f->tile_small, line2, x, y2, dim, 0);
+}
+
 static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int body_h,
-                           int pad, Arrival *arr, int n, float scale) {
+                           int pad, Arrival *arr, int n,
+                           ScheduledDeparture *scheduled, int ns, float scale) {
     SDL_Color white = { 255, 255, 255, 255 };
     SDL_Color dim   = { 210, 210, 210, 255 };
 
@@ -291,7 +372,13 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
     int radius = clampi((int)(26 * scale), 10, 42);
 
     int show_n = n < TILE_SLOTS_MAX ? n : TILE_SLOTS_MAX;
-    for (int i = 0; i < show_n; i++) {
+    int scheduled_rows = (ns + cols - 1) / cols;
+    if (scheduled_rows > rows) scheduled_rows = rows;
+    int realtime_slots = (rows - scheduled_rows) * cols;
+    if (realtime_slots > show_n) realtime_slots = show_n;
+
+    /* Real-time tiles: top, grow down */
+    for (int i = 0; i < realtime_slots && i < show_n; i++) {
         int c = i % cols;
         int rr = i / cols;
         SDL_Rect trc = {
@@ -302,11 +389,25 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
         };
         draw_tile_content(r, f, &arr[i], trc, scale, white, dim, radius);
     }
+
+    /* Scheduled tiles: bottom, grow up */
+    for (int i = 0; i < ns; i++) {
+        int c = i % cols;
+        int rr = rows - 1 - (i / cols);
+        SDL_Rect trc = {
+            pad + c * (tile_w + gap),
+            body_y + rr * (tile_h + gap),
+            tile_w,
+            tile_h
+        };
+        draw_scheduled_tile_content(r, f, &scheduled[i], trc, scale, radius);
+    }
 }
 
 void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
                const char *stop_id, const char *stop_name,
                Weather *wx, Arrival *arr, int n,
+               ScheduledDeparture *scheduled, int ns,
                SDL_Texture *bg_tex, SDL_Texture *steam_tex, SDL_Texture *logo_tex,
                TTF_Font *symbol_font) {
     SDL_Color white = { 255, 255, 255, 255 };
@@ -331,12 +432,12 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
 
     draw_footer(r, f, W, H, pad, logo_tex, scale);
 
-    if (n <= 0) {
+    if (n <= 0 && ( !scheduled || ns <= 0)) {
         draw_text(r, f->h1, "No upcoming buses", W / 2, body_y + body_h / 2, white, 1);
         SDL_RenderPresent(r);
         return;
     }
 
-    draw_tile_grid(r, f, W, body_y, body_h, pad, arr, n, scale);
+    draw_tile_grid(r, f, W, body_y, body_h, pad, arr, n, scheduled ? scheduled : (ScheduledDeparture *)0, scheduled ? ns : 0, scale);
     SDL_RenderPresent(r);
 }

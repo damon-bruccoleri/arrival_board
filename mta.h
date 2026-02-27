@@ -16,3 +16,6 @@ int fetch_mta_arrivals(Arrival *arr, int max_arr,
                       char *stop_name, size_t stop_name_sz,
                       const char *mta_key, const char *stop_id,
                       const char *route_filter);
+
+/* Build comma-separated list of routes in arr[0..n-1]. Log to stderr if any are Express (QM, BM, BxM, X). */
+void mta_log_realtime_express_routes(const Arrival *arr, int n);

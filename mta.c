@@ -289,3 +289,26 @@ int fetch_mta_arrivals(Arrival *arr, int max_arr,
     cJSON_Delete(root);
     return count;
 }
+
+static int is_express_route(const char *route) {
+    if (!route || !route[0]) return 0;
+    return (strncmp(route, "QM", 2) == 0 || strncmp(route, "BM", 2) == 0 ||
+            strncmp(route, "BxM", 3) == 0 || route[0] == 'X');
+}
+
+void mta_log_realtime_express_routes(const Arrival *arr, int n) {
+    if (!arr || n <= 0) return;
+    char buf[512];
+    size_t cur = 0;
+    int express_count = 0;
+    for (int i = 0; i < n; i++) {
+        size_t space = sizeof(buf) - cur;
+        if (space < 32) break;
+        int max_route = (int)(space - (i > 0 ? 2 : 1));
+        if (max_route <= 0) break;
+        cur += (size_t)snprintf(buf + cur, space, "%s%.*s", i > 0 ? "," : "", max_route, arr[i].route);
+        if (is_express_route(arr[i].route)) express_count++;
+    }
+    if (express_count > 0)
+        fprintf(stderr, "MTA: %d Express route(s) in real-time data: %s\n", express_count, buf);
+}
