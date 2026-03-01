@@ -77,9 +77,9 @@ int main(int argc, char **argv) {
     SDL_GetRendererOutputSize(r, &W, &H);
     if (W <= 0 || H <= 0) SDL_GetWindowSize(win, &W, &H);
 
-    SDL_Texture *bg_tex = NULL, *steam_tex = NULL, *logo_tex = NULL;
+    SDL_Texture *bg_tex = NULL, *steam_tex = NULL, *logo_tex = NULL, *wide_tile_tex = NULL, *narrow_tile_tex = NULL;
 #ifdef USE_SDL_IMAGE
-    texture_load(r, &bg_tex, &steam_tex, &logo_tex);
+    texture_load(r, &bg_tex, &steam_tex, &logo_tex, &wide_tile_tex, &narrow_tile_tex);
 #endif
 
     Fonts fonts;
@@ -201,8 +201,9 @@ int main(int argc, char **argv) {
         SDL_GetRendererOutputSize(r, &W, &H);
         ui_render(r, &fonts, W, H,
                   cfg.stop_id[0] ? cfg.stop_id : "--", stop_name, &wx,
-                  arrivals, n, scheduled, n_scheduled,
-                  bg_tex, steam_tex, logo_tex, symbol_font);
+                  arrivals, n, prev_arrivals, n_prev,
+                  scheduled, n_scheduled,
+                  bg_tex, steam_tex, logo_tex, wide_tile_tex, narrow_tile_tex, symbol_font);
 
         SDL_Delay(16);
     }
@@ -212,6 +213,8 @@ done:
     if (bg_tex) SDL_DestroyTexture(bg_tex);
     if (steam_tex) SDL_DestroyTexture(steam_tex);
     if (logo_tex) SDL_DestroyTexture(logo_tex);
+    if (wide_tile_tex) SDL_DestroyTexture(wide_tile_tex);
+    if (narrow_tile_tex) SDL_DestroyTexture(narrow_tile_tex);
     if (symbol_font) TTF_CloseFont(symbol_font);
     tile_free_fonts(&fonts);
     SDL_DestroyRenderer(r);

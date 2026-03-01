@@ -1,28 +1,14 @@
 # Audio (PipeWire/Pulse) on Raspberry Pi OS / Debian
 
-The run script starts PipeWire or Pulse so the kiosk gets sound and music+flip mix.
+The run script starts PipeWire or Pulse so the kiosk gets sound and music+flip mix. The app uses **paplay** (no libpulse link); install `pulseaudio-utils` for the `paplay` command.
 
-## 1. Install packages (no `pipewire-audio-client-utils` on Debian)
+## 1. Install packages
 
 **PipeWire (recommended):**
 ```bash
 sudo apt install pipewire pipewire-pulse pulseaudio-utils
-sudo apt install libpulse-dev   # so run script can build with USE_PULSE=1
 ```
-
-**For `paplay` (optional if you build with USE_PULSE=1):**
-```bash
-sudo apt install pulseaudio-utils
-```
-`paplay` comes from `pulseaudio-utils` and works with PipeWire when `pipewire-pulse` is installed.
-
-**Or use libpulse only (no paplay needed):**  
-Build with `USE_PULSE=1` (the run script does this when `libpulse-dev` is installed). Then install:
-```bash
-sudo apt install libpulse-dev   # for build
-sudo apt install pipewire pipewire-pulse
-```
-Music and flip use the Pulse API; no `pulseaudio-utils` required.
+`paplay` from `pulseaudio-utils` sends audio to PipeWire; the server mixes music and flip.
 
 **PulseAudio instead of PipeWire:**
 ```bash

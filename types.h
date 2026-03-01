@@ -41,7 +41,8 @@ typedef struct ScheduledDeparture {
 /* Grid layout: fixed columns and rows; only this many tiles are drawn. */
 #define TILE_COLS_FIXED  2
 #define TILE_ROWS_FIXED  6
-#define TILE_SLOTS_MAX  (TILE_COLS_FIXED * TILE_ROWS_FIXED)
+#define TILE_SLOTS_MAX   (TILE_COLS_FIXED * TILE_ROWS_FIXED)
+#define TILE_SLOTS_VISIBLE  11   /* 12th slot (bottom-right) is empty for logo */
 
 /* Reference height for scaling (e.g. 2160p). Layout scales from this. */
 #define LAYOUT_REF_HEIGHT  2160

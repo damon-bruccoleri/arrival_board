@@ -13,11 +13,6 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
-#if defined(USE_PULSE)
-#include <pulse/simple.h>
-#include <pulse/error.h>
-#endif
-
 static pid_t music_pid = -1;
 static pid_t ferry_pid = -1;
 static char mixed_path_buf[512]; /* sox mixed file; unlink on stop */
@@ -67,62 +62,13 @@ fail:
     return -1;
 }
 
-#if defined(USE_PULSE)
-static int use_pulse_for_flip(const char *flip_path) {
-    pa_simple *s = NULL;
-    FILE *f;
-    unsigned char header[44];
-    uint32_t rate;
-    uint16_t channels;
-    pa_sample_spec ss;
-    char buf[1024];
-    size_t n;
-    int pa_err = 0;
-    int r = -1;
-
-    if (!flip_path || !flip_path[0]) return 0;
-    f = fopen(flip_path, "rb");
-    if (!f) {
-        if (getenv("AUDIO_DEBUG")) fprintf(stderr, "AUDIO_DEBUG: flip file open failed: %s\n", flip_path);
-        return 0;
-    }
-    if (fread(header, 1, 44, f) != 44) goto out;
-    if (memcmp(header, "RIFF", 4) != 0 || memcmp(header + 8, "WAVE", 4) != 0) goto out;
-    channels = (uint16_t)((unsigned char)header[22] | ((unsigned char)header[23] << 8));
-    rate = (uint32_t)((unsigned char)header[24] | ((unsigned char)header[25] << 8) | ((unsigned char)header[26] << 16) | ((unsigned char)header[27] << 24));
-    if (channels == 0 || channels > 2 || rate < 4000 || rate > 192000) goto out;
-    ss.format = PA_SAMPLE_S16LE;
-    ss.rate = rate;
-    ss.channels = channels;
-    s = pa_simple_new(NULL, "arrival_board", PA_STREAM_PLAYBACK, NULL, "flip", &ss, NULL, NULL, &pa_err);
-    if (!s) goto out;
-    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
-        if (pa_simple_write(s, buf, n, &pa_err) < 0) break;
-    }
-    pa_simple_drain(s, &pa_err);
-    r = 0;
-out:
-    if (s) pa_simple_free(s);
-    if (f) fclose(f);
-    if (getenv("AUDIO_DEBUG") && r != 0) fprintf(stderr, "AUDIO_DEBUG: Pulse flip failed, will use paplay/aplay\n");
-    return (r == 0);
-}
-#endif
-
 void audio_play_flip(const char *flip_path, const char *aplay_device) {
     if (!flip_path || !flip_path[0]) return;
 
     int audio_debug = (getenv("AUDIO_DEBUG") != NULL);
     if (audio_debug)
         fprintf(stderr, "AUDIO_DEBUG: audio_play_flip path=%s device=%s\n",
-                flip_path, aplay_device && aplay_device[0] ? aplay_device : "(Pulse)");
-
-#if defined(USE_PULSE)
-    if (use_pulse_for_flip(flip_path)) {
-        if (audio_debug) fprintf(stderr, "AUDIO_DEBUG: flip played via Pulse (libpulse)\n");
-        return;
-    }
-#endif
+                flip_path, aplay_device && aplay_device[0] ? aplay_device : "(paplay)");
 
     if (!aplay_device || !aplay_device[0]) {
         /* Pulse path: paplay in background, mixes with music */

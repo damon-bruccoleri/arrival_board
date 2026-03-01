@@ -18,10 +18,13 @@ static SDL_Surface *load_surface(const char *path, const char *alt_path) {
 }
 
 void texture_load(SDL_Renderer *r,
-                  SDL_Texture **bg_tex, SDL_Texture **steam_tex, SDL_Texture **logo_tex) {
+                  SDL_Texture **bg_tex, SDL_Texture **steam_tex, SDL_Texture **logo_tex,
+                  SDL_Texture **wide_tile_tex, SDL_Texture **narrow_tile_tex) {
     *bg_tex = NULL;
     *steam_tex = NULL;
     *logo_tex = NULL;
+    *wide_tile_tex = NULL;
+    *narrow_tile_tex = NULL;
 
     const char *bg_path = getenv("BACKGROUND_IMAGE");
     if (!bg_path || !*bg_path) bg_path = "Steampunk bus image.png";
@@ -99,14 +102,62 @@ void texture_load(SDL_Renderer *r,
         }
     } else
         logf_("Logo not found: %s", IMG_GetError());
+
+    const char *wide_path = "tools/WideTile.png";
+    char wide_alt[512];
+    if (getenv("HOME"))
+        snprintf(wide_alt, sizeof(wide_alt), "%s/arrival_board/tools/WideTile.png", getenv("HOME"));
+    else
+        wide_alt[0] = '\0';
+    SDL_Surface *wide_surf = load_surface(wide_path, wide_alt[0] ? wide_alt : NULL);
+    if (wide_surf) {
+        /* Force RGBA format so alpha is preserved (some renderers create RGB texture from surface). */
+        SDL_Surface *rgba_surf = SDL_ConvertSurfaceFormat(wide_surf, SDL_PIXELFORMAT_RGBA8888, 0);
+        if (rgba_surf) {
+            SDL_FreeSurface(wide_surf);
+            wide_surf = rgba_surf;
+        }
+        *wide_tile_tex = SDL_CreateTextureFromSurface(r, wide_surf);
+        SDL_FreeSurface(wide_surf);
+        if (*wide_tile_tex) {
+            SDL_SetTextureBlendMode(*wide_tile_tex, SDL_BLENDMODE_BLEND);
+            logf_("Wide tile background loaded: tools/WideTile.png");
+        }
+    } else
+        logf_("Wide tile image not found: %s", IMG_GetError());
+
+    const char *narrow_path = "tools/NarrowTile.png";
+    char narrow_alt[512];
+    if (getenv("HOME"))
+        snprintf(narrow_alt, sizeof(narrow_alt), "%s/arrival_board/tools/NarrowTile.png", getenv("HOME"));
+    else
+        narrow_alt[0] = '\0';
+    SDL_Surface *narrow_surf = load_surface(narrow_path, narrow_alt[0] ? narrow_alt : NULL);
+    if (narrow_surf) {
+        SDL_Surface *rgba_surf = SDL_ConvertSurfaceFormat(narrow_surf, SDL_PIXELFORMAT_RGBA8888, 0);
+        if (rgba_surf) {
+            SDL_FreeSurface(narrow_surf);
+            narrow_surf = rgba_surf;
+        }
+        *narrow_tile_tex = SDL_CreateTextureFromSurface(r, narrow_surf);
+        SDL_FreeSurface(narrow_surf);
+        if (*narrow_tile_tex) {
+            SDL_SetTextureBlendMode(*narrow_tile_tex, SDL_BLENDMODE_BLEND);
+            logf_("Narrow tile background loaded: tools/NarrowTile.png");
+        }
+    } else
+        logf_("Narrow tile image not found: %s", IMG_GetError());
 }
 
 #else
 void texture_load(SDL_Renderer *r,
-                  SDL_Texture **bg_tex, SDL_Texture **steam_tex, SDL_Texture **logo_tex) {
+                  SDL_Texture **bg_tex, SDL_Texture **steam_tex, SDL_Texture **logo_tex,
+                  SDL_Texture **wide_tile_tex, SDL_Texture **narrow_tile_tex) {
     (void)r;
     *bg_tex = NULL;
     *steam_tex = NULL;
     *logo_tex = NULL;
+    *wide_tile_tex = NULL;
+    *narrow_tile_tex = NULL;
 }
 #endif

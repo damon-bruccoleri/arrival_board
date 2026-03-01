@@ -15,11 +15,6 @@ CFLAGS += -DUSE_SDL_IMAGE
 LIBS += -lSDL2_image
 endif
 
-ifneq ($(USE_PULSE),)
-CFLAGS += -DUSE_PULSE $(shell pkg-config --cflags libpulse 2>/dev/null || echo -I/usr/include)
-LIBS += $(shell pkg-config --libs libpulse-simple 2>/dev/null || echo -lpulse-simple -lpulse -pthread)
-endif
-
 OBJS = main.o audio.o config.o gtfs.o tile.o texture.o ui.o util.o mta.o weather.o
 
 all: arrival_board
@@ -60,4 +55,16 @@ weather.o: weather.c weather.h types.h util.h
 clean:
 	rm -f $(OBJS) arrival_board
 
-.PHONY: all clean
+# Stop any running arrival_board or run_arrival_board.sh so a new build can use the display.
+stop:
+	@echo "Stopping any running arrival_board..."
+	@pgrep -af arrival_board || true
+	-pkill -f run_arrival_board || true
+	-pkill -f arrival_board || true
+	@echo "Done."
+
+# Build, stop any running instance, then run the new binary (foreground; Ctrl+C to exit).
+run: all stop
+	./arrival_board
+
+.PHONY: all clean stop run

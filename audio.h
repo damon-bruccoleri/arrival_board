@@ -1,5 +1,5 @@
 /*
- * Audio: PipeWire/PulseAudio (paplay or libpulse) or ALSA (aplay).
+ * Audio: PipeWire/PulseAudio via paplay, or ALSA via aplay when APLAY_DEVICE is set.
  * When aplay_device is NULL, uses paplay so music and flip mix. Otherwise aplay to raw device.
  */
 #pragma once

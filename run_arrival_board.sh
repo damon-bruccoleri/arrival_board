@@ -78,8 +78,9 @@ fi
 while true; do
   echo "--- build ---"
   make clean || true
-  # USE_SDL_IMAGE=1 for background image; USE_PULSE=1 for libpulse flip. Install: libsdl2-image-dev, libpulse-dev. For PipeWire: apt install pipewire pipewire-pulse; paplay from pulseaudio-utils (or use USE_PULSE=1 and skip paplay).
-  if ! make -j USE_SDL_IMAGE=1 USE_PULSE=1 2>/dev/null; then
+  # USE_SDL_IMAGE=1 for background image and textures. Install: libsdl2-image-dev.
+  # Audio: paplay (PulseAudio/PipeWire) or aplay when APLAY_DEVICE is set.
+  if ! make -j USE_SDL_IMAGE=1 2>/dev/null; then
     if ! make -j USE_SDL_IMAGE=1; then
       if ! make -j; then
         echo "build failed; retrying in 2s"

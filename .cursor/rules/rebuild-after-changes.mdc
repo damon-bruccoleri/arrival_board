@@ -1,0 +1,20 @@
+---
+description: Always rebuild and restart the app after code changes (Pi runs binary from disk)
+alwaysApply: true
+---
+
+# Rebuild and Restart After Code Changes
+
+After editing any source file (e.g. `*.c`, `*.h`, Makefile) in this project:
+
+1. **Run a full rebuild.** If the build succeeds, **stop any running instance and start the new binary**:
+   ```bash
+   cd /home/damon/arrival_board && make clean && make -j USE_SDL_IMAGE=1 && make stop && ./arrival_board &
+   ```
+   - `make clean && make -j USE_SDL_IMAGE=1`: full rebuild.
+   - If build fails, the command stops and the old process is left running.
+   - If build succeeds: `make stop` kills any running arrival_board/run script, then `./arrival_board &` runs the new binary in the background.
+
+2. Reboot does **not** recompile; only `make` does. The running process must be stopped (e.g. `make stop`) before the new binary can use the display.
+
+If you make changes but don't rebuild and restart, the running `arrival_board` binary is unchanged and the user will not see your fixes.
