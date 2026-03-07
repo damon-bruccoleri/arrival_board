@@ -24,57 +24,36 @@ void config_from_env(AppConfig *cfg) {
     if (!cfg) return;
     memset(cfg, 0, sizeof(*cfg));
 
-    /* Body font: FONT_PATH env, else Noto, else DejaVu fallback. */
+    /* Body font: FONT_PATH env if set and readable, else single default. No fallback. */
     const char *font_path = getenv("FONT_PATH");
     if (font_path && *font_path && access(font_path, R_OK) == 0)
         snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", font_path);
-    else {
+    else
         snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
-        if (access(cfg->font_path, R_OK) != 0)
-            snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-    }
 
-    /* Title font: TITLE_FONT_PATH env, then HOME path, then tools/, then exe-relative. */
+    /* Title font: TITLE_FONT_PATH only. No fallback chain. If unset, empty. */
     const char *title_font = getenv("TITLE_FONT_PATH");
     if (title_font && *title_font && access(title_font, R_OK) == 0)
         snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "%s", title_font);
-    if (!cfg->title_font_path[0] && getenv("HOME")) {
-        snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "%s/arrival_board/tools/fonts/Smythe-Regular.ttf", getenv("HOME"));
-        if (access(cfg->title_font_path, R_OK) != 0) cfg->title_font_path[0] = '\0';
-    }
-    if (!cfg->title_font_path[0] && access("tools/fonts/Smythe-Regular.ttf", R_OK) == 0)
-        snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "tools/fonts/Smythe-Regular.ttf");
-#ifdef __linux__
-    if (!cfg->title_font_path[0]) {
-        /* exe_path size so exe_path + "/tools/fonts/Smythe-Regular.ttf" fits in title_font_path (512). */
-        char exe_path[480];
-        ssize_t n = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-        if (n > 0) {
-            exe_path[n] = '\0';
-            char *slash = strrchr(exe_path, '/');
-            if (slash) {
-                *slash = '\0';
-                snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "%s/tools/fonts/Smythe-Regular.ttf", exe_path);
-                if (access(cfg->title_font_path, R_OK) != 0) cfg->title_font_path[0] = '\0';
-            }
-        }
-    }
-#endif
+    else
+        cfg->title_font_path[0] = '\0';
     resolve_absolute(cfg->title_font_path, sizeof(cfg->title_font_path));
     if (cfg->title_font_path[0])
         logf_("Title font path: %s", cfg->title_font_path);
-    else
-        logf_("Title font path: (none, using default)");
 
-    /* Symbol font: SYMBOL_FONT_PATH env, else Noto Symbols2, else DejaVu fallback. */
+    /* Symbol font: SYMBOL_FONT_PATH env if set and readable, else single default. No fallback. */
     const char *sym = getenv("SYMBOL_FONT_PATH");
     if (sym && *sym && access(sym, R_OK) == 0)
         snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", sym);
-    else {
+    else
         snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf");
-        if (access(cfg->symbol_font_path, R_OK) != 0)
-            snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-    }
+
+    /* Emoji font: EMOJI_FONT_PATH env if set and readable, else single default. No fallback; keep path even if missing so error can report it. */
+    const char *emoji = getenv("EMOJI_FONT_PATH");
+    if (emoji && *emoji && access(emoji, R_OK) == 0)
+        snprintf(cfg->emoji_font_path, sizeof(cfg->emoji_font_path), "%s", emoji);
+    else
+        snprintf(cfg->emoji_font_path, sizeof(cfg->emoji_font_path), "%s", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf");
 
     const char *mta_key = getenv("MTA_KEY");
     if (mta_key) snprintf(cfg->mta_key, sizeof(cfg->mta_key), "%s", mta_key);

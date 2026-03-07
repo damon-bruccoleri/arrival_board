@@ -5,18 +5,29 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Derive bold font path: "Foo.ttf" -> "Foo-Bold.ttf" */
+/* Derive bold font path: "Foo-Regular.ttf" -> "Foo-Bold.ttf", "Foo.ttf" -> "Foo-Bold.ttf" */
 static void font_path_bold(const char *path, char *out, size_t outsz) {
     size_t len = strlen(path);
-    if (len >= 4 && outsz > len + 5) {
-        const char *ext = path + len - 4;
-        if (ext[0] == '.' && ext[1] == 't' && ext[2] == 't' && ext[3] == 'f') {
-            size_t prefix = len - 4;
-            snprintf(out, outsz, "%.*s-Bold.ttf", (int)prefix, path);
-            return;
+    if (len < 4 || outsz < 16) {
+        snprintf(out, outsz, "%s", path);
+        return;
+    }
+    const char *ext = path + len - 4;
+    if (ext[0] != '.' || ext[1] != 't' || ext[2] != 't' || ext[3] != 'f') {
+        snprintf(out, outsz, "%s", path);
+        return;
+    }
+    size_t base_len = len - 4;  /* length without .ttf */
+    /* Strip -Regular or -Italic so NotoSans-Regular.ttf -> NotoSans-Bold.ttf */
+    const char *suffixes[] = { "-Regular", "-Italic", "-Condensed", "-Light" };
+    for (size_t i = 0; i < sizeof(suffixes) / sizeof(suffixes[0]); i++) {
+        size_t slen = strlen(suffixes[i]);
+        if (base_len > slen && memcmp(path + base_len - slen, suffixes[i], slen) == 0) {
+            base_len -= slen;
+            break;
         }
     }
-    snprintf(out, outsz, "%s", path);
+    snprintf(out, outsz, "%.*s-Bold.ttf", (int)base_len, path);
 }
 
 static SDL_Texture* tex_from_text(SDL_Renderer *r, TTF_Font *font, const char *utf8, SDL_Color c,
@@ -88,8 +99,10 @@ int tile_load_fonts(Fonts *f, const char *font_path, const char *title_font_path
     if(!f->h1 || !f->h2 || !f->tile_big || !f->tile_med || !f->tile_small) {
         return -1;
     }
-    /* Bold tile font: use regular as fallback when Bold file not installed. */
-    if (!f->tile_big_bold) f->tile_big_bold = f->tile_big;
+    if (!f->tile_big_bold) {
+        logf_("Failed to load bold font at %s", bold_path);
+        return -1;
+    }
 
     TTF_SetFontHinting(f->h1, TTF_HINTING_LIGHT);
     TTF_SetFontHinting(f->h2, TTF_HINTING_LIGHT);
@@ -134,6 +147,22 @@ void draw_text(SDL_Renderer *r, TTF_Font *font, const char *utf8,
     if(align == 1) dst.x = x - tw/2;
     if(align == 2) dst.x = x - tw;
 
+    SDL_RenderCopy(r, t, NULL, &dst);
+    SDL_DestroyTexture(t);
+}
+
+void draw_text_scaled(SDL_Renderer *r, TTF_Font *font, const char *utf8,
+                      int x, int y, SDL_Color c, int align, float scale) {
+    int tw = 0, th = 0;
+    SDL_Texture *t = tex_from_text(r, font, utf8, c, &tw, &th);
+    if (!t || scale <= 0.f) return;
+    int dw = (int)(tw * scale + 0.5f);
+    int dh = (int)(th * scale + 0.5f);
+    if (dw < 1) dw = 1;
+    if (dh < 1) dh = 1;
+    SDL_Rect dst = { x, y, dw, dh };
+    if (align == 1) dst.x = x - dw / 2;
+    if (align == 2) dst.x = x - dw;
     SDL_RenderCopy(r, t, NULL, &dst);
     SDL_DestroyTexture(t);
 }

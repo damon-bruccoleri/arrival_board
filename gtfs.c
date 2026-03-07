@@ -341,16 +341,6 @@ static int route_excluded(const char *short_name, const char *realtime_routes) {
     return 0;
 }
 
-/* Is route an Express bus? (QM, BM, BxM, X prefixes) */
-static int is_express_route(const char *route_id) {
-    if (!route_id || !*route_id) return 0;
-    return (strncmp(route_id, "QM", 2) == 0 ||
-            strncmp(route_id, "BM", 2) == 0 ||
-            strncmp(route_id, "BxM", 3) == 0 ||
-            strncmp(route_id, "X", 1) == 0);
-}
-
-/* Now in America/New_York as (date_ymd, mins_since_midnight) */
 static void now_ny(int *out_ymd, int *out_mins) {
     time_t t = time(NULL);
     struct tm tm;
@@ -403,7 +393,7 @@ void gtfs_load(const char *gtfs_url, const char *cache_path) {
         (void)system(mkdir_cmd);
     }
     char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "curl -fsSL -o '%s' '%s' 2>/dev/null", cache_path, gtfs_url);
+    snprintf(cmd, sizeof(cmd), "curl -fsSL --connect-timeout 15 --max-time 120 -o '%s' '%s' 2>/dev/null", cache_path, gtfs_url);
     if (system(cmd) != 0) {
         logf_("GTFS: download failed at %s", cache_path);
         return;

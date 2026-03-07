@@ -104,7 +104,16 @@ int main(int argc, char **argv) {
 
     Fonts fonts;
     if (tile_load_fonts(&fonts, cfg.font_path, cfg.title_font_path[0] ? cfg.title_font_path : NULL, H) != 0) {
-        logf_("Failed to load font at %s", cfg.font_path);
+        logf_("Failed to load body/title font: %s", cfg.font_path[0] ? cfg.font_path : "(empty)");
+        fprintf(stderr, "Arrival Board: Required font missing.\n"
+                "Path: %s\n"
+                "Fix: Set FONT_PATH to a valid .ttf file, or install the font (e.g. sudo apt install fonts-noto-core).\n"
+                "See boot.log for details.\n", cfg.font_path[0] ? cfg.font_path : "(none)");
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Arrival Board",
+                "Required body/title font could not be loaded.\n"
+                "Set FONT_PATH to a valid .ttf file, or install the font (e.g. sudo apt install fonts-noto-core).\n"
+                "See boot.log for details.", win);
+        tile_free_fonts(&fonts);
         SDL_DestroyRenderer(r);
         SDL_DestroyWindow(win);
         TTF_Quit();
@@ -117,12 +126,35 @@ int main(int argc, char **argv) {
     TTF_Font *symbol_font = TTF_OpenFont(cfg.symbol_font_path, sym_pt);
     if (!symbol_font) {
         logf_("Failed to load symbol font at %s: %s", cfg.symbol_font_path, TTF_GetError());
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
-                                 "Arrival Board",
-                                 "Failed to load symbol font.\n"
-                                 "Check SYMBOL_FONT_PATH.\n"
-                                 "See boot.log for details.",
-                                 win);
+        fprintf(stderr, "Arrival Board: Symbol font missing.\n"
+                "Path: %s\n"
+                "Fix: Set SYMBOL_FONT_PATH to a valid .ttf file, or install (e.g. sudo apt install fonts-noto-core).\n"
+                "See boot.log for details.\n", cfg.symbol_font_path);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Arrival Board",
+                "Symbol font could not be loaded.\n"
+                "Set SYMBOL_FONT_PATH to a valid .ttf file, or install the font (e.g. sudo apt install fonts-noto-core).\n"
+                "See boot.log for details.", win);
+        tile_free_fonts(&fonts);
+        SDL_DestroyRenderer(r);
+        SDL_DestroyWindow(win);
+        TTF_Quit();
+        SDL_Quit();
+        return 1;
+    }
+    int emoji_pt = sym_pt / 2;
+    if (emoji_pt < 12) emoji_pt = 12;
+    TTF_Font *emoji_font = TTF_OpenFont(cfg.emoji_font_path, emoji_pt);
+    if (!emoji_font) {
+        logf_("Failed to load emoji font at %s: %s", cfg.emoji_font_path, TTF_GetError());
+        fprintf(stderr, "Arrival Board: Emoji font missing.\n"
+                "Path: %s\n"
+                "Fix: Set EMOJI_FONT_PATH to a valid .ttf file, or install (e.g. sudo apt install fonts-noto-color-emoji).\n"
+                "See boot.log for details.\n", cfg.emoji_font_path);
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Arrival Board",
+                "Emoji font could not be loaded.\n"
+                "Set EMOJI_FONT_PATH to a valid .ttf file, or install (e.g. sudo apt install fonts-noto-color-emoji).\n"
+                "See boot.log for details.", win);
+        TTF_CloseFont(symbol_font);
         tile_free_fonts(&fonts);
         SDL_DestroyRenderer(r);
         SDL_DestroyWindow(win);
@@ -141,8 +173,6 @@ int main(int argc, char **argv) {
     int n = 0;
     time_t last_fetch = 0;
     time_t last_gtfs_load = 0;
-    Arrival prev_arrivals[32];
-    int n_prev = 0;
     ScheduledDeparture scheduled[SCHEDULED_MAX];
     int n_scheduled = 0;
 
@@ -164,6 +194,19 @@ int main(int argc, char **argv) {
     else if (getenv("AUDIO_DEBUG"))
         fprintf(stderr, "AUDIO_DEBUG: music file not found, skipping audio\n");
 
+    /* Draw first frame so display shows something before blocking in gtfs_load. */
+    {
+        SDL_SetRenderDrawColor(r, 10, 12, 16, 255);
+        SDL_RenderClear(r);
+        ui_render(r, &fonts, W, H,
+                  cfg.stop_id[0] ? cfg.stop_id : "--", stop_name, &wx,
+                  arrivals, 0,
+                  scheduled, 0,
+                  bg_tex, steam_tex, logo_tex, wide_tile_tex, narrow_tile_tex,
+                  symbol_font, emoji_font,
+                  NULL, NULL);
+    }
+
     gtfs_load(cfg.gtfs_url, cfg.gtfs_cache);
     last_gtfs_load = time(NULL);
 
@@ -177,8 +220,6 @@ int main(int argc, char **argv) {
 
         time_t now = time(NULL);
         if (!last_fetch || difftime(now, last_fetch) >= cfg.poll_seconds) {
-            memcpy(prev_arrivals, arrivals, sizeof(prev_arrivals));
-            n_prev = n;
             char sn[256];
             sn[0] = '\0';
             n = fetch_mta_arrivals(arrivals, cfg.max_tiles, sn, sizeof(sn),
@@ -222,9 +263,10 @@ int main(int argc, char **argv) {
         }
         ui_render(r, &fonts, W, H,
                   cfg.stop_id[0] ? cfg.stop_id : "--", stop_name, &wx,
-                  arrivals, n, prev_arrivals, n_prev,
+                  arrivals, n,
                   scheduled, n_scheduled,
-                  bg_tex, steam_tex, logo_tex, wide_tile_tex, narrow_tile_tex, symbol_font,
+                  bg_tex, steam_tex, logo_tex, wide_tile_tex, narrow_tile_tex,
+                  symbol_font, emoji_font,
                   cfg.flip_path[0] ? on_flip_ended : NULL,
                   cfg.flip_path[0] ? (void*)&flip_ctx : NULL);
 
@@ -239,6 +281,7 @@ done:
     if (wide_tile_tex) SDL_DestroyTexture(wide_tile_tex);
     if (narrow_tile_tex) SDL_DestroyTexture(narrow_tile_tex);
     if (symbol_font) TTF_CloseFont(symbol_font);
+    if (emoji_font) TTF_CloseFont(emoji_font);
     tile_free_fonts(&fonts);
     SDL_DestroyRenderer(r);
     SDL_DestroyWindow(win);

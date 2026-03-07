@@ -356,7 +356,8 @@ static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
 
 static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
                         const char *stop_id, const char *stop_name, Weather *wx,
-                        TTF_Font *symbol_font, float scale) {
+                        TTF_Font *symbol_font, TTF_Font *emoji_font, float scale) {
+    (void)symbol_font;
     SDL_Color white = { 255, 255, 255, 255 };
     SDL_Color dim   = { 210, 210, 210, 255 };
 
@@ -389,28 +390,37 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     int ts_w = 0, ts_h = 0;
     text_size(f->h2, ts, &ts_w, &ts_h);
     int time_moon_gap = clampi((int)(10 * scale), 6, 20);
-    /* First line: moon phase (if available) then time, right-aligned. */
-    if (wx && wx->have && wx->moon_phase >= 0.f) {
-        const char *moon_str = " ";
-        if (wx->moon_phase < 0.12f) moon_str = "New moon";
-        else if (wx->moon_phase < 0.37f) moon_str = "Waxing";
-        else if (wx->moon_phase < 0.62f) moon_str = "Full moon";
-        else if (wx->moon_phase < 0.87f) moon_str = "Waning";
-        else moon_str = "New moon";
-        int moon_w = 0;
-        text_size(f->h2, moon_str, &moon_w, NULL);
-        draw_text(r, f->h2, moon_str, right_x - ts_w - time_moon_gap, hdr.y + pad, white, 0);
+    int first_line_y = hdr.y + pad;
+
+    /* Moon phase glyphs (Noto Color Emoji): U+1F311..U+1F318, UTF-8. */
+    static const char moon_phase_utf8[8][5] = {
+        "\xF0\x9F\x8C\x91", "\xF0\x9F\x8C\x92", "\xF0\x9F\x8C\x93", "\xF0\x9F\x8C\x94",
+        "\xF0\x9F\x8C\x95", "\xF0\x9F\x8C\x96", "\xF0\x9F\x8C\x97", "\xF0\x9F\x8C\x98"
+    };
+    int moon_w = 0;
+    const char *moon_utf8 = NULL;
+    if (wx && wx->have && wx->moon_phase >= 0.f && emoji_font) {
+        int idx = (int)(wx->moon_phase * 8) % 8;
+        moon_utf8 = moon_phase_utf8[idx];
+        text_size(emoji_font, moon_utf8, &moon_w, NULL);
+        moon_w = (int)(moon_w * 0.5f + 0.5f);  /* layout uses scaled width */
     }
-    draw_text(r, f->h2, ts, right_x, hdr.y + pad, white, 2);
+
+    /* First line: date/time then moon glyph, right-justified (moon after time). */
+    if (moon_utf8 && moon_w > 0) {
+        int time_right_x = right_x - moon_w - time_moon_gap;
+        draw_text(r, f->h2, ts, time_right_x, first_line_y, white, 2);
+        draw_text_scaled(r, emoji_font, moon_utf8, right_x, first_line_y + 20, white, 2, 0.5f);
+    } else {
+        draw_text(r, f->h2, ts, right_x, first_line_y, white, 2);
+    }
 
     int right_line_gap = clampi((int)(12 * scale), 6, 24);
     /* Weather line: icon + temp + precip, moved up 10px from default. */
-    const int weather_line_offset = -10;
+    const int weather_line_offset = -20;
 
     if (wx && wx->have) {
-        /* Draw the weather icon with the symbol font (if provided), and the text
-         * (temp + precip) with the regular header font, right-aligned on the edge. */
-        TTF_Font *sym_font = symbol_font ? symbol_font : f->h2;
+        TTF_Font *w_icon_font = emoji_font;
         char info[96];
         if (wx->precip_prob >= 0)
             snprintf(info, sizeof(info), "%d°F   Precip %d%%", wx->temp_f, wx->precip_prob);
@@ -422,16 +432,14 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
         int info_w = 0;
         text_size(f->h2, info, &info_w, NULL);
         int icon_w = 0;
-        text_size(sym_font, wx->icon, &icon_w, NULL);
+        text_size(w_icon_font, wx->icon, &icon_w, NULL);
+        icon_w = (int)(icon_w * 0.5f + 0.5f);
         int gap_icon = clampi((int)(8 * scale), 4, 16);
         int y = hdr.y + pad + ts_h + right_line_gap + weather_line_offset;
 
-        /* Right-align the text at right_x, then place the icon just to its left.
-         * Draw the icon first so the temperature text is never obscured. */
         int text_left = right_x - info_w;
-        /* Place icon fully to the left of the text (account for icon width). */
         int icon_x = text_left - gap_icon - icon_w;
-        draw_text(r, sym_font, wx->icon, icon_x, y, white, 0);
+        draw_text_scaled(r, w_icon_font, wx->icon, icon_x, y + 20, white, 0, 0.5f);
         draw_text(r, f->h2, info, right_x, y, white, 2);
     } else {
         draw_text(r, f->h2, "Weather --", right_x, hdr.y + pad + ts_h + right_line_gap + weather_line_offset, dim, 2);
@@ -841,14 +849,11 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
 void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
                const char *stop_id, const char *stop_name,
                Weather *wx, Arrival *arr, int n,
-               Arrival *prev_arr, int n_prev,
                ScheduledDeparture *scheduled, int ns,
                SDL_Texture *bg_tex, SDL_Texture *steam_tex, SDL_Texture *logo_tex,
                SDL_Texture *wide_tile_tex, SDL_Texture *narrow_tile_tex,
-               TTF_Font *symbol_font,
+               TTF_Font *symbol_font, TTF_Font *emoji_font,
                void (*on_flip_ended)(void*), void *flip_userdata) {
-    (void)prev_arr;
-    (void)n_prev;
     SDL_Color white = { 255, 255, 255, 255 };
 
     SDL_SetRenderDrawColor(r, 10, 12, 16, 255);
@@ -863,7 +868,7 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
 
     draw_background_and_steam(r, W, H, body_y, body_h, bg_tex, steam_tex);
     draw_eyes(r, W, H, body_y, scale);
-    draw_header(r, f, W, pad, header_h, stop_id, stop_name, wx, symbol_font, scale);
+    draw_header(r, f, W, pad, header_h, stop_id, stop_name, wx, symbol_font, emoji_font, scale);
 
     body_y = pad + header_h + pad;
     body_h = H - body_y - pad;

@@ -22,6 +22,9 @@ void urlencode(char *out, size_t outsz, const char *in);
 /* Fetch URL via curl; returns malloc'd string or NULL. Caller must free. */
 char *http_get(const char *url);
 
+/* Return 1 if route is an Express route (QM*, BM*, BxM*, X*). */
+int is_express_route(const char *route);
+
 /* --- JSON helpers (return NULL or default; do not free the returned pointers) --- */
 const cJSON *jgeto(const cJSON *o, const char *k);   /* get object member */
 const cJSON *jgeti(const cJSON *a, int idx);         /* get array element */

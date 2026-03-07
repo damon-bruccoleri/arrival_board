@@ -69,6 +69,12 @@ char *http_get(const char *url) {
     return buf;
 }
 
+int is_express_route(const char *route) {
+    if (!route || !route[0]) return 0;
+    return (strncmp(route, "QM", 2) == 0 || strncmp(route, "BM", 2) == 0 ||
+            strncmp(route, "BxM", 3) == 0 || route[0] == 'X');
+}
+
 const cJSON *jgeto(const cJSON *o, const char *k) {
     if (!o || !cJSON_IsObject(o)) return NULL;
     return cJSON_GetObjectItemCaseSensitive((cJSON *)o, k);

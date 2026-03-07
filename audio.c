@@ -214,25 +214,3 @@ void audio_stop_music(void) {
         mixed_path_buf[0] = '\0';
     }
 }
-
-/* True if left-part fields changed (route, dest, bus, stops, ppl, miles). */
-static int arrival_left_changed(const Arrival *a, const Arrival *b) {
-    return strcmp(a->route, b->route) != 0 || strcmp(a->dest, b->dest) != 0 ||
-           strcmp(a->bus, b->bus) != 0 || a->stops_away != b->stops_away ||
-           a->ppl_est != b->ppl_est || (a->miles_away != b->miles_away);
-}
-
-/* True if right-part (mins) changed. */
-static int arrival_right_changed(const Arrival *a, const Arrival *b) {
-    return a->mins != b->mins;
-}
-
-int audio_should_play_flip(const Arrival *curr, int n_curr,
-                           const Arrival *prev, int n_prev) {
-    int slots = n_curr < n_prev ? n_curr : n_prev;
-    for (int i = 0; i < slots; i++) {
-        if (arrival_left_changed(&curr[i], &prev[i]) || arrival_right_changed(&curr[i], &prev[i]))
-            return 1;
-    }
-    return 0;
-}

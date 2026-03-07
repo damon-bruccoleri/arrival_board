@@ -21,6 +21,10 @@ void text_size(TTF_Font *font, const char *utf8, int *out_w, int *out_h);
 void draw_text(SDL_Renderer *r, TTF_Font *font, const char *utf8,
                int x, int y, SDL_Color c, int align /*0=L 1=C 2=R*/);
 
+/* Same as draw_text but scale the rendered glyph by 'scale' (e.g. 0.5 = half size). */
+void draw_text_scaled(SDL_Renderer *r, TTF_Font *font, const char *utf8,
+                      int x, int y, SDL_Color c, int align, float scale);
+
 void draw_text_trunc(SDL_Renderer *r, TTF_Font *font, const char *utf8,
                      int x, int y, int max_w, SDL_Color c, int align);
 

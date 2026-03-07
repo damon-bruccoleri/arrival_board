@@ -6,8 +6,9 @@
 
 typedef struct AppConfig {
     char font_path[512];
-    char title_font_path[512];  /* optional: font for "Arrival Board" header (e.g. Smythe) */
+    char title_font_path[512];  /* optional: set TITLE_FONT_PATH for "Arrival Board" header; no fallback */
     char symbol_font_path[512];
+    char emoji_font_path[512];  /* required for moon/weather glyphs; no fallback */
     char mta_key[128];
     char stop_id[64];
     char route_filter[256];
@@ -22,5 +23,5 @@ typedef struct AppConfig {
     char aplay_device[128];
 } AppConfig;
 
-/* Fill config from environment. Paths are resolved (realpath, HOME fallbacks). */
+/* Fill config from environment. Paths resolved with realpath where applicable. */
 void config_from_env(AppConfig *cfg);

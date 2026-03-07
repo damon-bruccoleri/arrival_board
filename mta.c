@@ -290,12 +290,6 @@ int fetch_mta_arrivals(Arrival *arr, int max_arr,
     return count;
 }
 
-static int is_express_route(const char *route) {
-    if (!route || !route[0]) return 0;
-    return (strncmp(route, "QM", 2) == 0 || strncmp(route, "BM", 2) == 0 ||
-            strncmp(route, "BxM", 3) == 0 || route[0] == 'X');
-}
-
 void mta_log_realtime_express_routes(const Arrival *arr, int n) {
     if (!arr || n <= 0) return;
     char buf[512];
