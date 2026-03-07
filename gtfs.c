@@ -1,6 +1,6 @@
 /*
  * GTFS static: load MTA bus GTFS zip, parse, find next scheduled departures.
- * Timezone America/New_York. Cache zip; use previous if download fails.
+ * Timezone America/New_York. Requires successful download; no cache fallback.
  */
 #include "gtfs.h"
 #include "util.h"
@@ -404,14 +404,9 @@ void gtfs_load(const char *gtfs_url, const char *cache_path) {
     }
     char cmd[2048];
     snprintf(cmd, sizeof(cmd), "curl -fsSL -o '%s' '%s' 2>/dev/null", cache_path, gtfs_url);
-    int dl_ok = (system(cmd) == 0);
-    if (!dl_ok) {
-        FILE *f = fopen(cache_path, "rb");
-        if (!f) {
-            logf_("GTFS: download failed and no cache at %s", cache_path);
-            return;
-        }
-        fclose(f);
+    if (system(cmd) != 0) {
+        logf_("GTFS: download failed at %s", cache_path);
+        return;
     }
 
     read_zip_file(cache_path, "routes.txt", routes_fn, NULL);

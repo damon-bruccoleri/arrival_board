@@ -23,6 +23,30 @@
 #include <SDL2/SDL_image.h>
 #endif
 
+typedef struct {
+    const char *flip_path;
+    const char *aplay_device;
+    const char *music_path;
+    const char *music_loop2_path;
+} FlipSoundCtx;
+
+static void on_flip_ended(void *userdata) {
+    FlipSoundCtx *ctx = (FlipSoundCtx *)userdata;
+    if (!ctx || !ctx->flip_path || !ctx->flip_path[0]) return;
+    if (getenv("AUDIO_DEBUG"))
+        fprintf(stderr, "AUDIO_DEBUG: flip ended, playing sound\n");
+    if (ctx->aplay_device && ctx->aplay_device[0]) {
+        audio_stop_music();
+        audio_play_flip(ctx->flip_path, ctx->aplay_device);
+        if (ctx->music_path && access(ctx->music_path, R_OK) == 0)
+            audio_start_music(ctx->music_path,
+                              ctx->music_loop2_path && ctx->music_loop2_path[0] ? ctx->music_loop2_path : NULL,
+                              ctx->aplay_device);
+    } else {
+        audio_play_flip(ctx->flip_path, NULL);
+    }
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -62,10 +86,6 @@ int main(int argc, char **argv) {
     Uint32 rflags = SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC;
     SDL_Renderer *r = SDL_CreateRenderer(win, -1, rflags);
     if (!r) {
-        logf_("CreateRenderer accelerated failed: %s; falling back to software", SDL_GetError());
-        r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE);
-    }
-    if (!r) {
         logf_("CreateRenderer failed: %s", SDL_GetError());
         SDL_DestroyWindow(win);
         TTF_Quit();
@@ -83,7 +103,7 @@ int main(int argc, char **argv) {
 #endif
 
     Fonts fonts;
-    if (tile_load_fonts(&fonts, cfg.font_path, H) != 0) {
+    if (tile_load_fonts(&fonts, cfg.font_path, cfg.title_font_path[0] ? cfg.title_font_path : NULL, H) != 0) {
         logf_("Failed to load font at %s", cfg.font_path);
         SDL_DestroyRenderer(r);
         SDL_DestroyWindow(win);
@@ -96,19 +116,26 @@ int main(int argc, char **argv) {
     int sym_pt = clampi((int)(58.f * sym_scale), 26, 120);
     TTF_Font *symbol_font = TTF_OpenFont(cfg.symbol_font_path, sym_pt);
     if (!symbol_font) {
-        const char *fallbacks[] = {
-            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-            "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-            NULL
-        };
-        for (int i = 0; fallbacks[i] && !symbol_font; i++)
-            symbol_font = TTF_OpenFont(fallbacks[i], sym_pt);
+        logf_("Failed to load symbol font at %s: %s", cfg.symbol_font_path, TTF_GetError());
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                                 "Arrival Board",
+                                 "Failed to load symbol font.\n"
+                                 "Check SYMBOL_FONT_PATH.\n"
+                                 "See boot.log for details.",
+                                 win);
+        tile_free_fonts(&fonts);
+        SDL_DestroyRenderer(r);
+        SDL_DestroyWindow(win);
+        TTF_Quit();
+        SDL_Quit();
+        return 1;
     }
 
     Weather wx;
     memset(&wx, 0, sizeof(wx));
     wx.precip_prob = -1;
     wx.precip_in = -1.0;
+    wx.moon_phase = -1.f;
 
     Arrival arrivals[32];
     int n = 0;
@@ -160,20 +187,7 @@ int main(int argc, char **argv) {
             if (!stop_name[0] && sn[0]) snprintf(stop_name, sizeof(stop_name), "%s", sn);
             fetch_weather(&wx, stop_name[0] ? stop_name : NULL);
 
-            if (n_prev > 0 && cfg.flip_path[0] && audio_should_play_flip(arrivals, n, prev_arrivals, n_prev)) {
-                if (getenv("AUDIO_DEBUG"))
-                    fprintf(stderr, "AUDIO_DEBUG: trigger flip (board change)\n");
-                if (cfg.aplay_device[0]) {
-                    audio_stop_music();
-                    audio_play_flip(cfg.flip_path, cfg.aplay_device);
-                    if (access(cfg.music_path, R_OK) == 0)
-                        audio_start_music(cfg.music_path,
-                                          cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
-                                          cfg.aplay_device);
-                } else {
-                    audio_play_flip(cfg.flip_path, NULL);
-                }
-            }
+            /* Flip sound is played when animation ends (via on_flip_ended callback), not here. */
             last_fetch = now;
 
             mta_log_realtime_express_routes(arrivals, n);
@@ -199,11 +213,20 @@ int main(int argc, char **argv) {
         }
 
         SDL_GetRendererOutputSize(r, &W, &H);
+        static FlipSoundCtx flip_ctx;
+        if (cfg.flip_path[0]) {
+            flip_ctx.flip_path = cfg.flip_path;
+            flip_ctx.aplay_device = cfg.aplay_device;
+            flip_ctx.music_path = cfg.music_path;
+            flip_ctx.music_loop2_path = cfg.music_loop2_path;
+        }
         ui_render(r, &fonts, W, H,
                   cfg.stop_id[0] ? cfg.stop_id : "--", stop_name, &wx,
                   arrivals, n, prev_arrivals, n_prev,
                   scheduled, n_scheduled,
-                  bg_tex, steam_tex, logo_tex, wide_tile_tex, narrow_tile_tex, symbol_font);
+                  bg_tex, steam_tex, logo_tex, wide_tile_tex, narrow_tile_tex, symbol_font,
+                  cfg.flip_path[0] ? on_flip_ended : NULL,
+                  cfg.flip_path[0] ? (void*)&flip_ctx : NULL);
 
         SDL_Delay(16);
     }

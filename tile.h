@@ -5,13 +5,15 @@
 typedef struct Fonts {
     TTF_Font *h1;
     TTF_Font *h2;
+    TTF_Font *title_font;      /* optional: "Arrival Board" header (e.g. Smythe); NULL = use h1 */
+    TTF_Font *title_small;     /* optional: small-size title font (e.g. Smythe) for name in footer */
     TTF_Font *tile_big;
     TTF_Font *tile_big_bold;  /* bold variant for route styling */
     TTF_Font *tile_med;
     TTF_Font *tile_small;
 } Fonts;
 
-int  tile_load_fonts(Fonts *f, const char *font_path, int screen_h);
+int  tile_load_fonts(Fonts *f, const char *font_path, const char *title_font_path, int screen_h);
 void tile_free_fonts(Fonts *f);
 
 void text_size(TTF_Font *font, const char *utf8, int *out_w, int *out_h);

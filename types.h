@@ -22,9 +22,11 @@ typedef struct Arrival {
 typedef struct Weather {
     int have;
     char icon[8];       /* unicode symbol */
+    int is_day;         /* 1=day, 0=night, -1 unknown */
     int temp_f;
     int precip_prob;    /* percent, -1 if unknown */
     double precip_in;   /* inches, -1 if unknown */
+    float moon_phase;   /* 0=new, 0.25=first quarter, 0.5=full, 0.75=last quarter; <0 if unknown */
     time_t last_fetch;
     double lat, lon;
 } Weather;

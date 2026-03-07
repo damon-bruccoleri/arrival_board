@@ -6,6 +6,7 @@
 
 typedef struct AppConfig {
     char font_path[512];
+    char title_font_path[512];  /* optional: font for "Arrival Board" header (e.g. Smythe) */
     char symbol_font_path[512];
     char mta_key[128];
     char stop_id[64];

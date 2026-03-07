@@ -215,21 +215,24 @@ void audio_stop_music(void) {
     }
 }
 
+/* True if left-part fields changed (route, dest, bus, stops, ppl, miles). */
+static int arrival_left_changed(const Arrival *a, const Arrival *b) {
+    return strcmp(a->route, b->route) != 0 || strcmp(a->dest, b->dest) != 0 ||
+           strcmp(a->bus, b->bus) != 0 || a->stops_away != b->stops_away ||
+           a->ppl_est != b->ppl_est || (a->miles_away != b->miles_away);
+}
+
+/* True if right-part (mins) changed. */
+static int arrival_right_changed(const Arrival *a, const Arrival *b) {
+    return a->mins != b->mins;
+}
+
 int audio_should_play_flip(const Arrival *curr, int n_curr,
                            const Arrival *prev, int n_prev) {
-    for (int i = 0; i < n_curr; i++) {
-        const Arrival *a = &curr[i];
-        int is_new = 1;
-        int transition_to_now = 0;
-        for (int j = 0; j < n_prev; j++) {
-            const Arrival *b = &prev[j];
-            if (strcmp(a->bus, b->bus) == 0 && strcmp(a->route, b->route) == 0) {
-                is_new = 0;
-                if (a->mins == 0 && b->mins > 0) transition_to_now = 1;
-                break;
-            }
-        }
-        if (is_new || transition_to_now) return 1;
+    int slots = n_curr < n_prev ? n_curr : n_prev;
+    for (int i = 0; i < slots; i++) {
+        if (arrival_left_changed(&curr[i], &prev[i]) || arrival_right_changed(&curr[i], &prev[i]))
+            return 1;
     }
     return 0;
 }

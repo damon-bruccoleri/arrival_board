@@ -19,6 +19,6 @@ void audio_stop_music(void);
 /* Play flip. With NULL device uses Pulse (mixes); with device uses ALSA (caller stops music first). */
 void audio_play_flip(const char *flip_path, const char *aplay_device);
 
-/* Return 1 if flip should play: new bus on board, or bus just arrived (mins->0). */
+/* Return 1 if flip should play: any tile's left or right content changed (syncs with visual flip). */
 int audio_should_play_flip(const Arrival *curr, int n_curr,
                            const Arrival *prev, int n_prev);

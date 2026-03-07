@@ -31,7 +31,7 @@ static SDL_Texture* tex_from_text(SDL_Renderer *r, TTF_Font *font, const char *u
     return t;
 }
 
-int tile_load_fonts(Fonts *f, const char *font_path, int screen_h) {
+int tile_load_fonts(Fonts *f, const char *font_path, const char *title_font_path, int screen_h) {
     if(!f) return -1;
     memset(f, 0, sizeof(*f));
 
@@ -47,12 +47,14 @@ int tile_load_fonts(Fonts *f, const char *font_path, int screen_h) {
 
     int h1 = (int)(86 * scale);
     int h2 = (int)(58 * scale);
+    int title_h = (int)(120 * scale);  /* larger than h1 for "ARRIVAL BOARD" */
     int tb = (int)(92 * scale);
     int tm = (int)(60 * scale);
     int ts = (int)(46 * scale);
 
     h1 = clampi(h1, 34, 160);
     h2 = clampi(h2, 26, 120);
+    title_h = clampi(title_h, 48, 220);
     tb = clampi(tb, 30, 170);
     tm = clampi(tm, 22, 130);
     ts = clampi(ts, 18, 100);
@@ -62,6 +64,22 @@ int tile_load_fonts(Fonts *f, const char *font_path, int screen_h) {
 
     f->h1 = TTF_OpenFont(font_path, h1);
     f->h2 = TTF_OpenFont(font_path, h2);
+    if (title_font_path && title_font_path[0]) {
+        f->title_font = TTF_OpenFont(title_font_path, title_h);
+        if (f->title_font)
+            logf_("Title font loaded: %s", title_font_path);
+        else {
+            logf_("Title font failed: %s", title_font_path);
+            return -1;
+        }
+
+        /* Small-size Smythe for the name in the footer, significantly larger than tile_small. */
+        f->title_small = TTF_OpenFont(title_font_path, ts + 20);
+        if (!f->title_small) {
+            logf_("Title small font failed: %s", title_font_path);
+            return -1;
+        }
+    }
     f->tile_big      = TTF_OpenFont(font_path, tb);
     f->tile_big_bold = TTF_OpenFont(bold_path, tb);
     f->tile_med      = TTF_OpenFont(font_path, tm);
@@ -70,10 +88,13 @@ int tile_load_fonts(Fonts *f, const char *font_path, int screen_h) {
     if(!f->h1 || !f->h2 || !f->tile_big || !f->tile_med || !f->tile_small) {
         return -1;
     }
-    if (!f->tile_big_bold) f->tile_big_bold = f->tile_big;  /* fallback to regular */
+    /* Bold tile font: use regular as fallback when Bold file not installed. */
+    if (!f->tile_big_bold) f->tile_big_bold = f->tile_big;
 
     TTF_SetFontHinting(f->h1, TTF_HINTING_LIGHT);
     TTF_SetFontHinting(f->h2, TTF_HINTING_LIGHT);
+    if (f->title_font) TTF_SetFontHinting(f->title_font, TTF_HINTING_LIGHT);
+    if (f->title_small) TTF_SetFontHinting(f->title_small, TTF_HINTING_LIGHT);
     TTF_SetFontHinting(f->tile_big, TTF_HINTING_LIGHT);
     if (f->tile_big_bold != f->tile_big) TTF_SetFontHinting(f->tile_big_bold, TTF_HINTING_LIGHT);
     TTF_SetFontHinting(f->tile_med, TTF_HINTING_LIGHT);
@@ -85,6 +106,8 @@ void tile_free_fonts(Fonts *f){
     if(!f) return;
     if(f->h1) TTF_CloseFont(f->h1);
     if(f->h2) TTF_CloseFont(f->h2);
+    if(f->title_font) TTF_CloseFont(f->title_font);
+    if(f->title_small) TTF_CloseFont(f->title_small);
     if(f->tile_big) TTF_CloseFont(f->tile_big);
     if(f->tile_big_bold && f->tile_big_bold != f->tile_big) TTF_CloseFont(f->tile_big_bold);
     if(f->tile_med) TTF_CloseFont(f->tile_med);

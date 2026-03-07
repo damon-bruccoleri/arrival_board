@@ -22,14 +22,14 @@ echo "USER=$(id -un) UID=$(id -u) ULIMIT_NOFILE=$(ulimit -n)"
 echo "ENV: SDL_VIDEODRIVER=${SDL_VIDEODRIVER:-<unset>} SDL_RENDER_DRIVER=${SDL_RENDER_DRIVER:-<unset>} DISPLAY=${DISPLAY:-<unset>}"
 echo "CFG: STOP_ID=${STOP_ID:-<unset>} ROUTE_FILTER=${ROUTE_FILTER:-} POLL_SECONDS=${POLL_SECONDS:-10}"
 
-# Install ALSA config so default device uses HDMI with dmix (music + flip can play). Avoid permission-denied: try cp, then sudo cp+chown.
+# Install ALSA config so default device uses HDMI with dmix (music + flip can play).
 if [ -f "$HOME/arrival_board/tools/asoundrc" ]; then
   if ! cp "$HOME/arrival_board/tools/asoundrc" "$HOME/.asoundrc" 2>/dev/null; then
     sudo -n cp "$HOME/arrival_board/tools/asoundrc" "$HOME/.asoundrc" 2>/dev/null && sudo -n chown "$(whoami):" "$HOME/.asoundrc" 2>/dev/null || true
   fi
 fi
 
-# Unmute Pi HDMI output (often muted after boot)
+# Unmute Pi HDMI output (try HDMI control first, then Master; often muted after boot)
 amixer -c vc4hdmi0 set HDMI 100% unmute 2>/dev/null || amixer -c vc4hdmi0 set Master 100% unmute 2>/dev/null || true
 
 # Start PipeWire or Pulse so kiosk has sound and music+flip mix. Verify with pactl before using.
@@ -46,13 +46,11 @@ pulse_ok() {
 start_sound_server() {
   ensure_runtime_dir || true
   if pulse_ok; then echo "Pulse already running"; return 0; fi
-  # Try systemd user (works after graphical login)
   if systemctl --user is-active pipewire &>/dev/null; then sleep 2; pulse_ok && return 0; fi
   if command -v pulseaudio &>/dev/null && pulseaudio --check 2>/dev/null; then return 0; fi
   if systemctl --user start pipewire pipewire-pulse 2>/dev/null; then
     for _ in 1 2 3 4 5; do sleep 1; pulse_ok && return 0; done
   fi
-  # Run daemons directly (kiosk without user session or systemd user not ready)
   if command -v pipewire &>/dev/null; then
     pipewire &>/dev/null &
     sleep 1
@@ -78,16 +76,10 @@ fi
 while true; do
   echo "--- build ---"
   make clean || true
-  # USE_SDL_IMAGE=1 for background image and textures. Install: libsdl2-image-dev.
-  # Audio: paplay (PulseAudio/PipeWire) or aplay when APLAY_DEVICE is set.
-  if ! make -j USE_SDL_IMAGE=1 2>/dev/null; then
-    if ! make -j USE_SDL_IMAGE=1; then
-      if ! make -j; then
-        echo "build failed; retrying in 2s"
-        sleep 2
-        continue
-      fi
-    fi
+  if ! make -j USE_SDL_IMAGE=1; then
+    echo "build failed; retrying in 2s"
+    sleep 2
+    continue
   fi
 
   echo "--- run loop ---"

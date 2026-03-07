@@ -33,7 +33,7 @@ typedef struct {
 
     /* Mechanical flip: duration and ease-in (split goes 1 -> 0). */
 /* 1.0s drop time for the split curve. */
-#define FLIP_DURATION_MS  500
+#define FLIP_DURATION_MS  1000
 
 /* Palette: distinct colors for route names. Same route => same color (real-time and scheduled). Regular and express share palette. */
 #define ROUTE_PALETTE_SIZE 48
@@ -170,11 +170,18 @@ static void draw_tile_right_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
         int h1 = 0, h2 = 0;
         text_size(mins_font, minsbuf, NULL, &h1);
         text_size(f->tile_small, "min", NULL, &h2);
-        int line_gap = clampi((int)(8 * scale), 4, 14);
+        /* Tighten vertical spacing. SDL_ttf glyph boxes can include extra vertical
+         * whitespace; allowing a small negative gap tucks the lines together while
+         * keeping the two-line block vertically centered. */
+        int gap_lo = -(int)(24 * scale);
+        if (gap_lo > -6) gap_lo = -6;
+        int gap_hi = (int)(4 * scale);
+        if (gap_hi < 2) gap_hi = 2;
+        int line_gap = clampi((int)(-0.28f * (float)h2), gap_lo, gap_hi);
         int block_h = h1 + line_gap + h2;
         int top_y = center_y - block_h / 2;
         draw_text(r, mins_font, minsbuf, center_x, top_y, eta_color, 1);
-        draw_text(r, f->tile_small, "min", center_x, top_y + h1 + line_gap, dim, 1);
+        draw_text(r, f->tile_small, "min", center_x, top_y + h1 + line_gap - 20, dim, 1);
     }
 }
 
@@ -282,12 +289,17 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
     const float speed_scale = (1.0f / 25.0f) * 1.3f;
     for (int i = 0; i < STEAM_PUFFS; i++) {
         float sdt = dt_norm * speed_scale;
-        puffs[i].y -= puffs[i].rise * sdt;
-        puffs[i].x += drift_right_per_up * puffs[i].rise * sdt;
+        /* Right puff travels 10% faster than left. */
+        float speed_mult = (i == 1) ? 1.1f : 1.0f;
+        puffs[i].y -= puffs[i].rise * sdt * speed_mult;
+        puffs[i].x += drift_right_per_up * puffs[i].rise * sdt * speed_mult;
         puffs[i].alpha -= fade_speed * sdt;
         puffs[i].scale += scale_grow * sdt;
 
-        if (puffs[i].alpha <= 0.f || puffs[i].y < (float)(body_y - 120)) {
+        /* Respawn when faded out, too high, or (for right puff) when its center moves off-screen. */
+        if (puffs[i].alpha <= 0.f ||
+            puffs[i].y < (float)(body_y - 120) ||
+            (i == 1 && puffs[i].x > (float)W)) {
             float ex_x = (float)W * exhaust_img_x[i] + origin_dx[i];
             float ex_y = (float)body_y + (float)body_h * exhaust_img_y[i] + origin_dy[i];
             puffs[i].x = ex_x + (float)((i * 17) % 21 - 10);
@@ -345,7 +357,6 @@ static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
 static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
                         const char *stop_id, const char *stop_name, Weather *wx,
                         TTF_Font *symbol_font, float scale) {
-    (void)symbol_font;
     SDL_Color white = { 255, 255, 255, 255 };
     SDL_Color dim   = { 210, 210, 210, 255 };
 
@@ -354,7 +365,8 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     fill_round_rect(r, hdr, clampi((int)(24 * scale), 10, 40));
 
     int title_y = hdr.y + clampi((int)(22 * scale), 10, 36);
-    draw_text(r, f->h1, "Arrival Board", hdr.x + hdr.w / 2, title_y, white, 1);
+    TTF_Font *title_font = (f->title_font) ? f->title_font : f->h1;
+    draw_text(r, title_font, "Arrival Board", hdr.x + hdr.w / 2, title_y, white, 1);
 
     char left1[256];
     if (stop_name && *stop_name) snprintf(left1, sizeof(left1), "%s", stop_name);
@@ -374,22 +386,55 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     localtime_r(&now, &lt);
     char ts[64];
     strftime(ts, sizeof(ts), "%a %b %-d  %-I:%M %p", &lt);
-    int ts_h = 0;
-    text_size(f->h2, ts, NULL, &ts_h);
-    int right_line_gap = clampi((int)(12 * scale), 6, 24);
+    int ts_w = 0, ts_h = 0;
+    text_size(f->h2, ts, &ts_w, &ts_h);
+    int time_moon_gap = clampi((int)(10 * scale), 6, 20);
+    /* First line: moon phase (if available) then time, right-aligned. */
+    if (wx && wx->have && wx->moon_phase >= 0.f) {
+        const char *moon_str = " ";
+        if (wx->moon_phase < 0.12f) moon_str = "New moon";
+        else if (wx->moon_phase < 0.37f) moon_str = "Waxing";
+        else if (wx->moon_phase < 0.62f) moon_str = "Full moon";
+        else if (wx->moon_phase < 0.87f) moon_str = "Waning";
+        else moon_str = "New moon";
+        int moon_w = 0;
+        text_size(f->h2, moon_str, &moon_w, NULL);
+        draw_text(r, f->h2, moon_str, right_x - ts_w - time_moon_gap, hdr.y + pad, white, 0);
+    }
     draw_text(r, f->h2, ts, right_x, hdr.y + pad, white, 2);
 
+    int right_line_gap = clampi((int)(12 * scale), 6, 24);
+    /* Weather line: icon + temp + precip, moved up 10px from default. */
+    const int weather_line_offset = -10;
+
     if (wx && wx->have) {
-        char wline[128];
+        /* Draw the weather icon with the symbol font (if provided), and the text
+         * (temp + precip) with the regular header font, right-aligned on the edge. */
+        TTF_Font *sym_font = symbol_font ? symbol_font : f->h2;
+        char info[96];
         if (wx->precip_prob >= 0)
-            snprintf(wline, sizeof(wline), "%s  %d°F   Precip %d%%", wx->icon, wx->temp_f, wx->precip_prob);
+            snprintf(info, sizeof(info), "%d°F   Precip %d%%", wx->temp_f, wx->precip_prob);
         else if (wx->precip_in >= 0)
-            snprintf(wline, sizeof(wline), "%s  %d°F   Precip %.2f in", wx->icon, wx->temp_f, wx->precip_in);
+            snprintf(info, sizeof(info), "%d°F   Precip %.2f in", wx->temp_f, wx->precip_in);
         else
-            snprintf(wline, sizeof(wline), "%s  %d°F   Precip --", wx->icon, wx->temp_f);
-        draw_text(r, f->h2, wline, right_x, hdr.y + pad + ts_h + right_line_gap, white, 2);
+            snprintf(info, sizeof(info), "%d°F   Precip --", wx->temp_f);
+
+        int info_w = 0;
+        text_size(f->h2, info, &info_w, NULL);
+        int icon_w = 0;
+        text_size(sym_font, wx->icon, &icon_w, NULL);
+        int gap_icon = clampi((int)(8 * scale), 4, 16);
+        int y = hdr.y + pad + ts_h + right_line_gap + weather_line_offset;
+
+        /* Right-align the text at right_x, then place the icon just to its left.
+         * Draw the icon first so the temperature text is never obscured. */
+        int text_left = right_x - info_w;
+        /* Place icon fully to the left of the text (account for icon width). */
+        int icon_x = text_left - gap_icon - icon_w;
+        draw_text(r, sym_font, wx->icon, icon_x, y, white, 0);
+        draw_text(r, f->h2, info, right_x, y, white, 2);
     } else {
-        draw_text(r, f->h2, "Weather --", right_x, hdr.y + pad + ts_h + right_line_gap, dim, 2);
+        draw_text(r, f->h2, "Weather --", right_x, hdr.y + pad + ts_h + right_line_gap + weather_line_offset, dim, 2);
     }
 }
 
@@ -401,7 +446,7 @@ static void draw_footer(SDL_Renderer *r, Fonts *f, int W, int H,
 
     const int cols = TILE_COLS_FIXED;
     const int rows = TILE_ROWS_FIXED;
-    int gap = clampi((int)(26 * scale), 2, 58);
+    int gap = clampi((int)(20 * scale), 2, 48);
     int tile_w = (W - 2 * pad - gap * (cols - 1)) / cols;
     int tile_h = (body_h - gap * (rows - 1)) / rows;
     /* Empty cell is bottom-right (col 1, row 5) - slot 11. */
@@ -412,37 +457,69 @@ static void draw_footer(SDL_Renderer *r, Fonts *f, int W, int H,
         tile_h
     };
 
-    static const char copy_str[] = "\xC2\xA9 2026 Damon";
-    int cw = 0, ch = 0;
-    text_size(f->tile_small, copy_str, &cw, &ch);
-    int copy_h = ch;
+    /* Copyright text: "(C) 2026 " in small font; name in small Smythe (title_small) at larger size. */
+    static const char copy_left[] = "\xC2\xA9 2026 ";
+    static const char copy_name[] = "D Bruccoleri";
+    int left_w = 0, left_h = 0;
+    text_size(f->tile_small, copy_left, &left_w, &left_h);
+    TTF_Font *name_font = (f->title_small) ? f->title_small : f->tile_small;
+    int name_w = 0, name_h = 0;
+    text_size(name_font, copy_name, &name_w, &name_h);
+    int copy_w = left_w + name_w;
+    int copy_h = (left_h > name_h) ? left_h : name_h;
     int inset = clampi((int)(12 * scale), 6, 24);
+    int logo_copy_gap = clampi((int)(16 * scale), 8, 32);
 
+    int logo_w = 0, logo_h = 0;
     if (logo_tex) {
         int tw = 0, th = 0;
         SDL_QueryTexture(logo_tex, NULL, NULL, &tw, &th);
         if (tw > 0 && th > 0) {
-            int max_h = cell.h - copy_h - inset * 2;
-            if (max_h > 20) {
-                int dw = (int)((long)max_h * (long)tw / (long)th);
-                if (dw > cell.w - inset * 2) dw = cell.w - inset * 2;
-                int dh = (int)((long)dw * (long)th / (long)tw);
-                if (dh > max_h) dh = max_h;
-                SDL_Rect logo_dst = {
-                    cell.x + (cell.w - dw) / 2,
-                    cell.y + inset,
-                    dw,
-                    dh
-                };
-                SDL_RenderCopy(r, logo_tex, NULL, &logo_dst);
+            /* Logo height fills the cell (with inset). */
+            logo_h = cell.h - 2 * inset;
+            if (logo_h > 0) {
+                logo_w = (int)((long)logo_h * (long)tw / (long)th);
+                if (logo_w > cell.w - inset * 2) {
+                    logo_w = cell.w - inset * 2;
+                    logo_h = (int)((long)logo_w * (long)th / (long)tw);
+                }
             }
         }
     }
 
-    draw_text(r, f->tile_small, copy_str,
-              cell.x + cell.w / 2,
-              cell.y + cell.h - inset - copy_h / 2,
-              dim, 1);
+    /* Center logo + copyright side by side in the cell. */
+    int total_w = logo_w + logo_copy_gap + copy_w;
+    int start_x = cell.x + (cell.w - total_w) / 2;
+    int logo_x = start_x;
+    int copy_x = start_x + logo_w + logo_copy_gap;
+    if (logo_w == 0) copy_x = cell.x + (cell.w - copy_w) / 2;
+
+    if (logo_tex && logo_w > 0 && logo_h > 0) {
+        int tw = 0, th = 0;
+        SDL_QueryTexture(logo_tex, NULL, NULL, &tw, &th);
+        SDL_Rect logo_dst = {
+            logo_x,
+            cell.y + (cell.h - logo_h) / 2,
+            logo_w,
+            logo_h
+        };
+        SDL_RenderCopy(r, logo_tex, NULL, &logo_dst);
+    }
+
+    /* Copyright: vertically centered with logo. */
+    int copy_y = cell.y + (cell.h - copy_h) / 2;
+    /* Left part: © and year in small font, vertically centered within combined block. */
+    int left_y = copy_y + (copy_h - left_h) / 2;
+    draw_text(r, f->tile_small, copy_left,
+              copy_x,
+              left_y,
+              dim, 0);
+    /* Name: small Smythe at same point size as left side, vertically centered. */
+    int name_y = copy_y + (copy_h - name_h) / 2;
+    draw_text(r, name_font, copy_name,
+              copy_x + left_w,
+              name_y,
+              dim, 0);
 }
 
 /* Format scheduled when (America/New_York): today = "2:30 PM", tomorrow = "tomorrow 2:30 PM", else "Wed 2:30 PM". */
@@ -511,7 +588,8 @@ static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const Schedul
 static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int body_h,
                            int pad, Arrival *arr, int n,
                            ScheduledDeparture *scheduled, int ns, float scale,
-                           SDL_Texture *wide_tile_tex, SDL_Texture *narrow_tile_tex) {
+                           SDL_Texture *wide_tile_tex, SDL_Texture *narrow_tile_tex,
+                           void (*on_flip_ended)(void*), void *flip_userdata) {
     SDL_Color white = { 255, 255, 255, 255 };
     SDL_Color dim   = { 210, 210, 210, 255 };
 
@@ -521,7 +599,7 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
     static const int slot_col[11] = { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0 };
     static const int slot_row[11] = { 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5 };
 
-    int gap = clampi((int)(26 * scale), 2, 58);
+    int gap = clampi((int)(20 * scale), 2, 48);
     int tile_w = (W - 2 * pad - gap * (cols - 1)) / cols;
     int tile_h = (body_h - gap * (rows - 1)) / rows;
     int radius = clampi((int)(26 * scale), 10, 42);
@@ -540,10 +618,13 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
     static int last_valid[TILE_SLOTS_MAX];
     static int left_animating[TILE_SLOTS_MAX];
     static float left_anim_t[TILE_SLOTS_MAX];
+    static float left_anim_delay_ms[TILE_SLOTS_MAX];  /* hold t=0 for 0.2s before animating */
     static int right_animating[TILE_SLOTS_MAX];
     static float right_anim_t[TILE_SLOTS_MAX];
+    static float right_anim_delay_ms[TILE_SLOTS_MAX];
     static int last_tile_w, last_tile_h;
     static Uint32 last_flip_ticks;
+    int flip_ended_this_frame = 0;
     Uint32 now = SDL_GetTicks();
     float dt_ms = (float)(now - last_flip_ticks);
     last_flip_ticks = now;
@@ -557,6 +638,7 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
             if (tex_right_display[j]) { SDL_DestroyTexture(tex_right_display[j]); tex_right_display[j] = NULL; }
             if (tex_right_prev[j])   { SDL_DestroyTexture(tex_right_prev[j]);   tex_right_prev[j] = NULL; }
             left_animating[j] = right_animating[j] = 0;
+            left_anim_delay_ms[j] = right_anim_delay_ms[j] = 0.f;
         }
         last_tile_w = tile_w;
         last_tile_h = tile_h;
@@ -600,8 +682,11 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
             last_valid[i] = 0;
         }
 
-        int left_chg = last_valid[i] && arrival_left_changed(&arr[i], &last_arrival[i]);
-        int right_chg = last_valid[i] && arrival_right_changed(&arr[i], &last_arrival[i]);
+        int left_chg = 0;
+        int right_chg = last_valid[i] ? arrival_right_changed(&arr[i], &last_arrival[i]) : 1;
+        /* Left tile only flips when time changed; then check if left info also changed. */
+        if (right_chg)
+            left_chg = arrival_left_changed(&arr[i], &last_arrival[i]);
         last_arrival[i] = arr[i];
         last_valid[i] = 1;
 
@@ -618,9 +703,16 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
 
         /* --- Draw LEFT part --- */
         if (left_animating[i]) {
-            float t = left_anim_t[i] + dt_ms / (float)FLIP_DURATION_MS;
-            if (t >= 1.f) { t = 1.f; left_animating[i] = 0; }
-            left_anim_t[i] = t;
+            /* Hold at t=0 for 0.2s before starting the GPU animation. */
+            if (left_anim_delay_ms[i] > 0.f) {
+                left_anim_delay_ms[i] -= dt_ms;
+                if (left_anim_delay_ms[i] < 0.f) left_anim_delay_ms[i] = 0.f;
+            } else {
+                float t = left_anim_t[i] + dt_ms / (float)FLIP_DURATION_MS;
+                if (t >= 1.f) { t = 1.f; left_animating[i] = 0; flip_ended_this_frame = 1; }
+                left_anim_t[i] = t;
+            }
+            float t = left_anim_t[i];
             float revealed = t * t * t;
             int h_new = (int)(revealed * (float)tile_h + 0.5f);
             if (h_new > tile_h) h_new = tile_h;
@@ -628,25 +720,23 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
 
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, tex_left_prev[i], NULL, &left_rect);
-            if (h_new > 0) {
-                float skew = 20.f * (1.f - t * t * t);
+            /* Quad uses minimum height 5px so the parallelogram is never degenerate on the first frame. */
+            int h_draw = (h_new > 0) ? h_new : 5;
+            if (h_draw > tile_h) h_draw = tile_h;
+            {
+                /* New tile: parallelogram; use only the revealed height in texture so the strip shows
+                 * the top of the tile. Quad geometry skews the texture so image fits the parallelogram. */
+                float skew = 100.f * (1.f - t * t * t);
+                float v = (tile_h > 0) ? ((float)h_draw / (float)tile_h) : 1.f;
+                if (v > 1.f) v = 1.f;
                 SDL_Vertex verts[4] = {
-                    { { (float)left_rect.x, (float)left_rect.y }, { 255,255,255,255 }, { 0.f, 0.f } },
-                    { { (float)(left_rect.x + left_rect.w), (float)left_rect.y }, { 255,255,255,255 }, { 1.f, 0.f } },
-                    { { (float)(left_rect.x + left_rect.w) - skew, (float)(left_rect.y + h_new) }, { 255,255,255,255 }, { 1.f, 1.f } },
-                    { { (float)left_rect.x - skew, (float)(left_rect.y + h_new) }, { 255,255,255,255 }, { 0.f, 1.f } },
+                    { { (float)left_rect.x,                 (float)left_rect.y },          { 255,255,255,255 }, { 0.f, 0.f } },
+                    { { (float)(left_rect.x + left_rect.w), (float)left_rect.y },          { 255,255,255,255 }, { 1.f, 0.f } },
+                    { { (float)(left_rect.x + left_rect.w) + skew, (float)(left_rect.y + h_draw) }, { 255,255,255,255 }, { 1.f, v } },
+                    { { (float)left_rect.x + skew,          (float)(left_rect.y + h_draw) }, { 255,255,255,255 }, { 0.f, v } },
                 };
                 int indices[] = { 0, 1, 2, 0, 2, 3 };
                 SDL_RenderGeometry(r, tex_left_display[i], verts, 4, indices, 6);
-                if (h_new < tile_h) {
-                    int yc = left_rect.y + h_new;
-                    SDL_SetRenderDrawColor(r, 255, 255, 255, 200);
-                    SDL_RenderFillRect(r, &(SDL_Rect){ left_rect.x, yc - 1, left_rect.w, 1 });
-                    SDL_SetRenderDrawColor(r, 0, 0, 0, 160);
-                    SDL_RenderFillRect(r, &(SDL_Rect){ left_rect.x, yc, left_rect.w, 2 });
-                    SDL_SetRenderDrawColor(r, 255, 255, 255, 160);
-                    SDL_RenderFillRect(r, &(SDL_Rect){ left_rect.x, yc + 2, left_rect.w, 1 });
-                }
             }
         } else {
             if (left_chg) {
@@ -656,10 +746,16 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
                 render_left_to_texture(r, f, tex_left_display[i], left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
                 left_animating[i] = 1;
                 left_anim_t[i] = 0.f;
+                left_anim_delay_ms[i] = 200.f;
                 SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
                 SDL_RenderCopy(r, tex_left_prev[i], NULL, &left_rect);
-            } else {
+            } else if (right_chg) {
+                /* Remaining time changed: update large tile text and show without animating. */
                 render_left_to_texture(r, f, tex_left_display[i], left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
+                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+                SDL_RenderCopy(r, tex_left_display[i], NULL, &left_rect);
+            } else {
+                /* No time change: do not change large tile text; just redraw existing. */
                 SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
                 SDL_RenderCopy(r, tex_left_display[i], NULL, &left_rect);
             }
@@ -667,9 +763,16 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
 
         /* --- Draw RIGHT part --- */
         if (right_animating[i]) {
-            float t = right_anim_t[i] + dt_ms / (float)FLIP_DURATION_MS;
-            if (t >= 1.f) { t = 1.f; right_animating[i] = 0; }
-            right_anim_t[i] = t;
+            /* Hold at t=0 for 0.2s before starting the GPU animation. */
+            if (right_anim_delay_ms[i] > 0.f) {
+                right_anim_delay_ms[i] -= dt_ms;
+                if (right_anim_delay_ms[i] < 0.f) right_anim_delay_ms[i] = 0.f;
+            } else {
+                float t = right_anim_t[i] + dt_ms / (float)FLIP_DURATION_MS;
+                if (t >= 1.f) { t = 1.f; right_animating[i] = 0; flip_ended_this_frame = 1; }
+                right_anim_t[i] = t;
+            }
+            float t = right_anim_t[i];
             float revealed = t * t * t;
             int h_new = (int)(revealed * (float)tile_h + 0.5f);
             if (h_new > tile_h) h_new = tile_h;
@@ -677,25 +780,22 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
 
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, tex_right_prev[i], NULL, &right_rect);
-            if (h_new > 0) {
-                float skew = 20.f * (1.f - t * t * t);
+            /* Quad uses minimum height 5px so the parallelogram is never degenerate on the first frame. */
+            int h_draw = (h_new > 0) ? h_new : 5;
+            if (h_draw > tile_h) h_draw = tile_h;
+            {
+                /* Right part: same parallelogram; revealed height v so strip shows top of tile, skewed. */
+                float skew = 100.f * (1.f - t * t * t);
+                float v = (tile_h > 0) ? ((float)h_draw / (float)tile_h) : 1.f;
+                if (v > 1.f) v = 1.f;
                 SDL_Vertex verts[4] = {
-                    { { (float)right_rect.x, (float)right_rect.y }, { 255,255,255,255 }, { 0.f, 0.f } },
-                    { { (float)(right_rect.x + right_rect.w), (float)right_rect.y }, { 255,255,255,255 }, { 1.f, 0.f } },
-                    { { (float)(right_rect.x + right_rect.w) - skew, (float)(right_rect.y + h_new) }, { 255,255,255,255 }, { 1.f, 1.f } },
-                    { { (float)right_rect.x - skew, (float)(right_rect.y + h_new) }, { 255,255,255,255 }, { 0.f, 1.f } },
+                    { { (float)right_rect.x,                 (float)right_rect.y },          { 255,255,255,255 }, { 0.f, 0.f } },
+                    { { (float)(right_rect.x + right_rect.w), (float)right_rect.y },          { 255,255,255,255 }, { 1.f, 0.f } },
+                    { { (float)(right_rect.x + right_rect.w) + skew, (float)(right_rect.y + h_draw) }, { 255,255,255,255 }, { 1.f, v } },
+                    { { (float)right_rect.x + skew,          (float)(right_rect.y + h_draw) }, { 255,255,255,255 }, { 0.f, v } },
                 };
                 int indices[] = { 0, 1, 2, 0, 2, 3 };
                 SDL_RenderGeometry(r, tex_right_display[i], verts, 4, indices, 6);
-                if (h_new < tile_h) {
-                    int yc = right_rect.y + h_new;
-                    SDL_SetRenderDrawColor(r, 255, 255, 255, 200);
-                    SDL_RenderFillRect(r, &(SDL_Rect){ right_rect.x, yc - 1, right_rect.w, 1 });
-                    SDL_SetRenderDrawColor(r, 0, 0, 0, 160);
-                    SDL_RenderFillRect(r, &(SDL_Rect){ right_rect.x, yc, right_rect.w, 2 });
-                    SDL_SetRenderDrawColor(r, 255, 255, 255, 160);
-                    SDL_RenderFillRect(r, &(SDL_Rect){ right_rect.x, yc + 2, right_rect.w, 1 });
-                }
             }
         } else {
             if (right_chg) {
@@ -705,10 +805,11 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
                 render_right_to_texture(r, f, tex_right_display[i], right_w, tile_h, &arr[i], scale, white, dim, radius, narrow_tile_tex);
                 right_animating[i] = 1;
                 right_anim_t[i] = 0.f;
+                right_anim_delay_ms[i] = 200.f;
                 SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
                 SDL_RenderCopy(r, tex_right_prev[i], NULL, &right_rect);
             } else {
-                render_right_to_texture(r, f, tex_right_display[i], right_w, tile_h, &arr[i], scale, white, dim, radius, narrow_tile_tex);
+                /* Time unchanged: just redraw existing right tile. */
                 SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
                 SDL_RenderCopy(r, tex_right_display[i], NULL, &right_rect);
             }
@@ -732,6 +833,9 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
         }
         draw_scheduled_tile_content(r, f, &scheduled[i], trc, scale, radius, wide_tile_tex);
     }
+
+    if (flip_ended_this_frame && on_flip_ended)
+        on_flip_ended(flip_userdata);
 }
 
 void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
@@ -741,7 +845,8 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
                ScheduledDeparture *scheduled, int ns,
                SDL_Texture *bg_tex, SDL_Texture *steam_tex, SDL_Texture *logo_tex,
                SDL_Texture *wide_tile_tex, SDL_Texture *narrow_tile_tex,
-               TTF_Font *symbol_font) {
+               TTF_Font *symbol_font,
+               void (*on_flip_ended)(void*), void *flip_userdata) {
     (void)prev_arr;
     (void)n_prev;
     SDL_Color white = { 255, 255, 255, 255 };
@@ -751,7 +856,7 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
 
     float scale = layout_scale(H);
     int pad = clampi((int)(46 * scale), 18, 90);
-    int header_h = clampi((int)(260 * scale), 140, 420);
+    int header_h = clampi((int)(220 * scale), 120, 380);
     int body_y = pad + header_h + pad;
     int body_h = H - body_y - pad;
     if (body_h < 100) body_h = 100;
@@ -772,6 +877,6 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
         return;
     }
 
-    draw_tile_grid(r, f, W, body_y, body_h, pad, arr, n, scheduled ? scheduled : (ScheduledDeparture *)0, scheduled ? ns : 0, scale, wide_tile_tex, narrow_tile_tex);
+    draw_tile_grid(r, f, W, body_y, body_h, pad, arr, n, scheduled ? scheduled : (ScheduledDeparture *)0, scheduled ? ns : 0, scale, wide_tile_tex, narrow_tile_tex, on_flip_ended, flip_userdata);
     SDL_RenderPresent(r);
 }

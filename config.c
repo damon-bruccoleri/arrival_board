@@ -20,24 +20,61 @@ static void resolve_absolute(char *path, size_t sz) {
         snprintf(path, sz, "%s", abs_buf);
 }
 
-static void try_same_dir_as_music(char *out, size_t outsz, const char *music_path, const char *filename) {
-    if (!music_path || !music_path[0] || !out || outsz == 0) return;
-    const char *last_slash = strrchr(music_path, '/');
-    if (!last_slash || (size_t)(last_slash - music_path) >= outsz) return;
-    snprintf(out, outsz, "%.*s/%s", (int)(last_slash - music_path), music_path, filename);
-}
-
 void config_from_env(AppConfig *cfg) {
     if (!cfg) return;
     memset(cfg, 0, sizeof(*cfg));
 
+    /* Body font: FONT_PATH env, else Noto, else DejaVu fallback. */
     const char *font_path = getenv("FONT_PATH");
-    if (!font_path || !*font_path) font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-    snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", font_path);
+    if (font_path && *font_path && access(font_path, R_OK) == 0)
+        snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", font_path);
+    else {
+        snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
+        if (access(cfg->font_path, R_OK) != 0)
+            snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+    }
 
+    /* Title font: TITLE_FONT_PATH env, then HOME path, then tools/, then exe-relative. */
+    const char *title_font = getenv("TITLE_FONT_PATH");
+    if (title_font && *title_font && access(title_font, R_OK) == 0)
+        snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "%s", title_font);
+    if (!cfg->title_font_path[0] && getenv("HOME")) {
+        snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "%s/arrival_board/tools/fonts/Smythe-Regular.ttf", getenv("HOME"));
+        if (access(cfg->title_font_path, R_OK) != 0) cfg->title_font_path[0] = '\0';
+    }
+    if (!cfg->title_font_path[0] && access("tools/fonts/Smythe-Regular.ttf", R_OK) == 0)
+        snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "tools/fonts/Smythe-Regular.ttf");
+#ifdef __linux__
+    if (!cfg->title_font_path[0]) {
+        /* exe_path size so exe_path + "/tools/fonts/Smythe-Regular.ttf" fits in title_font_path (512). */
+        char exe_path[480];
+        ssize_t n = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+        if (n > 0) {
+            exe_path[n] = '\0';
+            char *slash = strrchr(exe_path, '/');
+            if (slash) {
+                *slash = '\0';
+                snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "%s/tools/fonts/Smythe-Regular.ttf", exe_path);
+                if (access(cfg->title_font_path, R_OK) != 0) cfg->title_font_path[0] = '\0';
+            }
+        }
+    }
+#endif
+    resolve_absolute(cfg->title_font_path, sizeof(cfg->title_font_path));
+    if (cfg->title_font_path[0])
+        logf_("Title font path: %s", cfg->title_font_path);
+    else
+        logf_("Title font path: (none, using default)");
+
+    /* Symbol font: SYMBOL_FONT_PATH env, else Noto Symbols2, else DejaVu fallback. */
     const char *sym = getenv("SYMBOL_FONT_PATH");
-    if (!sym || !*sym) sym = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-    snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", sym);
+    if (sym && *sym && access(sym, R_OK) == 0)
+        snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", sym);
+    else {
+        snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf");
+        if (access(cfg->symbol_font_path, R_OK) != 0)
+            snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+    }
 
     const char *mta_key = getenv("MTA_KEY");
     if (mta_key) snprintf(cfg->mta_key, sizeof(cfg->mta_key), "%s", mta_key);
@@ -73,60 +110,18 @@ void config_from_env(AppConfig *cfg) {
     const char *aplay_dev = getenv("APLAY_DEVICE");
     if (aplay_dev) snprintf(cfg->aplay_device, sizeof(cfg->aplay_device), "%s", aplay_dev);
 
-    /* Music path: MUSIC_FILE / BACKGROUND_MUSIC, then default under HOME/tools */
-    const char *music_env = getenv("MUSIC_FILE");
-    if (!music_env || !*music_env) music_env = getenv("BACKGROUND_MUSIC");
-    if (music_env && *music_env) {
-        snprintf(cfg->music_path, sizeof(cfg->music_path), "%s", music_env);
-    } else {
-        snprintf(cfg->music_path, sizeof(cfg->music_path), "%s/arrival_board/tools/Seaport_Steampunk_Final_Mix.wav", home_dir());
-        if (access(cfg->music_path, R_OK) != 0)
-            snprintf(cfg->music_path, sizeof(cfg->music_path), "tools/Seaport_Steampunk_Final_Mix.wav");
-    }
+    /* Music path: single default under HOME/tools. */
+    snprintf(cfg->music_path, sizeof(cfg->music_path), "%s/arrival_board/tools/Seaport_Steampunk_Final_Mix.wav", home_dir());
+    if (access(cfg->music_path, R_OK) != 0) cfg->music_path[0] = '\0';
 
-    /* Ferry (second loop): SI Ferry.wav / .mp3 under HOME/tools or same dir as music */
+    /* Ferry (second loop): single default path. */
     snprintf(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), "%s/arrival_board/tools/SI Ferry.wav", home_dir());
-    if (access(cfg->music_loop2_path, R_OK) != 0) {
-        snprintf(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), "%s/arrival_board/tools/SI Ferry.mp3", home_dir());
-        if (access(cfg->music_loop2_path, R_OK) != 0) cfg->music_loop2_path[0] = '\0';
-    }
-    if (!cfg->music_loop2_path[0] && access("tools/SI Ferry.wav", R_OK) == 0)
-        snprintf(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), "tools/SI Ferry.wav");
-    if (!cfg->music_loop2_path[0] && access("tools/SI Ferry.mp3", R_OK) == 0)
-        snprintf(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), "tools/SI Ferry.mp3");
+    if (access(cfg->music_loop2_path, R_OK) != 0) cfg->music_loop2_path[0] = '\0';
     resolve_absolute(cfg->music_path, sizeof(cfg->music_path));
     resolve_absolute(cfg->music_loop2_path, sizeof(cfg->music_loop2_path));
-    if (cfg->music_path[0] && !cfg->music_loop2_path[0]) {
-        try_same_dir_as_music(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), cfg->music_path, "SI Ferry.wav");
-        if (access(cfg->music_loop2_path, R_OK) != 0) {
-            try_same_dir_as_music(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), cfg->music_path, "SI Ferry.mp3");
-            if (access(cfg->music_loop2_path, R_OK) != 0) cfg->music_loop2_path[0] = '\0';
-        }
-        if (cfg->music_loop2_path[0]) resolve_absolute(cfg->music_loop2_path, sizeof(cfg->music_loop2_path));
-    }
 
-    /* Flip sound: SOUND_FLIP env, then ddsm.wav / flip.wav in tools or same dir as music */
-    const char *env_flip = getenv("SOUND_FLIP");
-    if (env_flip && *env_flip && access(env_flip, R_OK) == 0)
-        snprintf(cfg->flip_path, sizeof(cfg->flip_path), "%s", env_flip);
-    if (!cfg->flip_path[0]) {
-        snprintf(cfg->flip_path, sizeof(cfg->flip_path), "%s/arrival_board/tools/ddsm.wav", home_dir());
-        if (access(cfg->flip_path, R_OK) != 0) cfg->flip_path[0] = '\0';
-    }
-    if (!cfg->flip_path[0] && access("tools/ddsm.wav", R_OK) == 0)
-        snprintf(cfg->flip_path, sizeof(cfg->flip_path), "tools/ddsm.wav");
-    if (!cfg->flip_path[0]) {
-        snprintf(cfg->flip_path, sizeof(cfg->flip_path), "%s/arrival_board/flip.wav", home_dir());
-        if (access(cfg->flip_path, R_OK) != 0) cfg->flip_path[0] = '\0';
-    }
-    if (!cfg->flip_path[0] && access("tools/flip.wav", R_OK) == 0)
-        snprintf(cfg->flip_path, sizeof(cfg->flip_path), "tools/flip.wav");
-    if (!cfg->flip_path[0] && cfg->music_path[0]) {
-        try_same_dir_as_music(cfg->flip_path, sizeof(cfg->flip_path), cfg->music_path, "ddsm.wav");
-        if (access(cfg->flip_path, R_OK) != 0) {
-            try_same_dir_as_music(cfg->flip_path, sizeof(cfg->flip_path), cfg->music_path, "flip.wav");
-            if (access(cfg->flip_path, R_OK) != 0) cfg->flip_path[0] = '\0';
-        }
-    }
+    /* Flip sound: single default path. */
+    snprintf(cfg->flip_path, sizeof(cfg->flip_path), "%s/arrival_board/tools/ddsm.wav", home_dir());
+    if (access(cfg->flip_path, R_OK) != 0) cfg->flip_path[0] = '\0';
     resolve_absolute(cfg->flip_path, sizeof(cfg->flip_path));
 }
