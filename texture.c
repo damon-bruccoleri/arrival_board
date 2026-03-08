@@ -53,6 +53,7 @@ void texture_load(SDL_Renderer *r,
         steam_alt[0] = '\0';
     SDL_Surface *steam_surf = load_surface(steam_path, steam_alt[0] ? steam_alt : NULL);
     if (!steam_surf) {
+        /* Generate in memory only (no disk write for read-only / hardening). */
         steam_surf = SDL_CreateRGBSurfaceWithFormat(0, STEAM_PUFF_SIZE, STEAM_PUFF_SIZE, 32, SDL_PIXELFORMAT_RGBA8888);
         if (steam_surf) {
             const float cen = (float)(STEAM_PUFF_SIZE / 2);
@@ -72,9 +73,6 @@ void texture_load(SDL_Renderer *r,
                 }
             }
             SDL_UnlockSurface(steam_surf);
-            if (IMG_SavePNG(steam_surf, steam_path) == 0) logf_("Created %s", steam_path);
-            SDL_FreeSurface(steam_surf);
-            steam_surf = IMG_Load(steam_path);
         }
     }
     if (steam_surf) {
@@ -82,9 +80,9 @@ void texture_load(SDL_Renderer *r,
         SDL_FreeSurface(steam_surf);
         if (*steam_tex) {
             SDL_SetTextureBlendMode(*steam_tex, SDL_BLENDMODE_BLEND);
-            logf_("Steam puff texture loaded");
         }
     }
+    /* If steam_tex is still NULL here (file missing/corrupt and in-memory gen failed), main.c will log to boot.log and exit. */
 
     const char *logo_path = "Damon Logo Large.png";
     char logo_alt[512];

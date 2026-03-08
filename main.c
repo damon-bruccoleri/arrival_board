@@ -100,10 +100,21 @@ int main(int argc, char **argv) {
     SDL_Texture *bg_tex = NULL, *steam_tex = NULL, *logo_tex = NULL, *wide_tile_tex = NULL, *narrow_tile_tex = NULL;
 #ifdef USE_SDL_IMAGE
     texture_load(r, &bg_tex, &steam_tex, &logo_tex, &wide_tile_tex, &narrow_tile_tex);
+    if (!steam_tex) {
+        log_to_boot_log("arrival_board: steam_puff.png missing, corrupt, or failed to load; terminating.");
+        if (bg_tex) SDL_DestroyTexture(bg_tex);
+        SDL_DestroyRenderer(r);
+        SDL_DestroyWindow(win);
+        IMG_Quit();
+        TTF_Quit();
+        SDL_Quit();
+        return 1;
+    }
 #endif
 
     Fonts fonts;
     if (tile_load_fonts(&fonts, cfg.font_path, cfg.title_font_path[0] ? cfg.title_font_path : NULL, H) != 0) {
+        log_to_boot_log("arrival_board: body/title font failed to load; terminating.");
         logf_("Failed to load body/title font: %s", cfg.font_path[0] ? cfg.font_path : "(empty)");
         fprintf(stderr, "Arrival Board: Required font missing.\n"
                 "Path: %s\n"
@@ -125,6 +136,7 @@ int main(int argc, char **argv) {
     int sym_pt = clampi((int)(58.f * sym_scale), 26, 120);
     TTF_Font *symbol_font = TTF_OpenFont(cfg.symbol_font_path, sym_pt);
     if (!symbol_font) {
+        log_to_boot_log("arrival_board: symbol font failed to load; terminating.");
         logf_("Failed to load symbol font at %s: %s", cfg.symbol_font_path, TTF_GetError());
         fprintf(stderr, "Arrival Board: Symbol font missing.\n"
                 "Path: %s\n"
@@ -145,6 +157,7 @@ int main(int argc, char **argv) {
     if (emoji_pt < 12) emoji_pt = 12;
     TTF_Font *emoji_font = TTF_OpenFont(cfg.emoji_font_path, emoji_pt);
     if (!emoji_font) {
+        log_to_boot_log("arrival_board: emoji font failed to load; terminating.");
         logf_("Failed to load emoji font at %s: %s", cfg.emoji_font_path, TTF_GetError());
         fprintf(stderr, "Arrival Board: Emoji font missing.\n"
                 "Path: %s\n"

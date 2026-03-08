@@ -16,6 +16,9 @@ float layout_scale(int screen_height);
 /* Log a line to stderr (printf-style). */
 void logf_(const char *fmt, ...);
 
+/* Append one line to boot.log (path from BOOT_LOG_PATH or $HOME/arrival_board/boot.log). Used for resource/code failures only. */
+void log_to_boot_log(const char *fmt, ...);
+
 /* URL-encode string 'in' into 'out', at most outsz bytes. Stops at first NUL. */
 void urlencode(char *out, size_t outsz, const char *in);
 

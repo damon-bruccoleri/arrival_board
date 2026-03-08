@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 int clampi(int v, int lo, int hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
@@ -22,6 +23,28 @@ void logf_(const char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     fputc('\n', stderr);
     va_end(ap);
+}
+
+void log_to_boot_log(const char *fmt, ...) {
+    const char *path = getenv("BOOT_LOG_PATH");
+    char buf[1024];
+    if (!path || !path[0]) {
+        const char *home = getenv("HOME");
+        if (home && *home)
+            snprintf(buf, sizeof(buf), "%s/arrival_board/boot.log", home);
+        else
+            return;
+        path = buf;
+    }
+    FILE *f = fopen(path, "a");
+    if (!f) return;
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(f, "%ld ", (long)time(NULL));
+    vfprintf(f, fmt, ap);
+    fputc('\n', f);
+    va_end(ap);
+    fclose(f);
 }
 
 void urlencode(char *out, size_t outsz, const char *in) {
