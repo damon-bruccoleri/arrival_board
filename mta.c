@@ -11,6 +11,16 @@
 #include <string.h>
 #include <time.h>
 
+enum {
+    MTA_STATUS_OK = 0,
+    MTA_STATUS_BAD_INPUT = 1,
+    MTA_STATUS_HTTP_FAIL = 2,
+    MTA_STATUS_JSON_FAIL = 3,
+    MTA_STATUS_SCHEMA_FAIL = 4,
+};
+
+static int g_mta_last_status = MTA_STATUS_OK;
+
 /* Normalize route string: use last segment after '_', ':', or '/'. */
 static void normalize_route(char *dst, size_t dstsz, const char *src) {
     if (!src) { snprintf(dst, dstsz, "?"); return; }
@@ -200,10 +210,16 @@ int fetch_mta_arrivals(Arrival *arr, int max_arr,
                        char *stop_name, size_t stop_name_sz,
                        const char *mta_key, const char *stop_id,
                        const char *route_filter) {
-    if (!arr || max_arr <= 0) return 0;
+    if (!arr || max_arr <= 0) {
+        g_mta_last_status = MTA_STATUS_BAD_INPUT;
+        return 0;
+    }
     if (stop_name && stop_name_sz) stop_name[0] = '\0';
 
-    if (!mta_key || !*mta_key || !stop_id || !*stop_id) return 0;
+    if (!mta_key || !*mta_key || !stop_id || !*stop_id) {
+        g_mta_last_status = MTA_STATUS_BAD_INPUT;
+        return 0;
+    }
 
     char url[1024];
     snprintf(url, sizeof(url),
@@ -211,19 +227,32 @@ int fetch_mta_arrivals(Arrival *arr, int max_arr,
              mta_key, stop_id, max_arr);
 
     char *json = http_get(url);
-    if (!json) return 0;
+    if (!json) {
+        g_mta_last_status = MTA_STATUS_HTTP_FAIL;
+        return -1;
+    }
 
     cJSON *root = cJSON_Parse(json);
     free(json);
-    if (!root) return 0;
+    if (!root) {
+        g_mta_last_status = MTA_STATUS_JSON_FAIL;
+        return -1;
+    }
 
     int count = 0;
 
     const cJSON *siri = jgeto(root, "Siri");
     const cJSON *sd = siri ? jgeto(siri, "ServiceDelivery") : NULL;
     const cJSON *smd = sd ? jgeto(sd, "StopMonitoringDelivery") : NULL;
-    const cJSON *del = jgeti(smd, 0);
-
+    /* SIRI JSON may use one object or an array of deliveries. */
+    const cJSON *del = NULL;
+    if (smd) {
+        if (cJSON_IsArray((cJSON *)smd))
+            del = jgeti(smd, 0);
+        else if (cJSON_IsObject((cJSON *)smd))
+            del = smd;
+    }
+    /* del may be NULL when there are no deliveries; empty feed is OK (0 arrivals), not SCHEMA_FAIL. */
     if (del && stop_name && stop_name_sz)
         parse_stop_name(stop_name, stop_name_sz, del);
 
@@ -287,7 +316,23 @@ int fetch_mta_arrivals(Arrival *arr, int max_arr,
     }
 
     cJSON_Delete(root);
+    g_mta_last_status = MTA_STATUS_OK;
     return count;
+}
+
+int mta_last_status(void) {
+    return g_mta_last_status;
+}
+
+const char *mta_last_status_str(void) {
+    switch (g_mta_last_status) {
+        case MTA_STATUS_OK: return "OK";
+        case MTA_STATUS_BAD_INPUT: return "BAD_INPUT";
+        case MTA_STATUS_HTTP_FAIL: return "HTTP_FAIL";
+        case MTA_STATUS_JSON_FAIL: return "JSON_FAIL";
+        case MTA_STATUS_SCHEMA_FAIL: return "SCHEMA_FAIL";
+        default: return "UNKNOWN";
+    }
 }
 
 void mta_log_realtime_express_routes(const Arrival *arr, int n) {

@@ -10,6 +10,16 @@
 #include <string.h>
 #include <time.h>
 
+enum {
+    WEATHER_STATUS_OK = 0,
+    WEATHER_STATUS_THROTTLED = 1,
+    WEATHER_STATUS_HTTP_FAIL = 2,
+    WEATHER_STATUS_JSON_FAIL = 3,
+    WEATHER_STATUS_SCHEMA_FAIL = 4,
+};
+
+static int g_weather_last_status = WEATHER_STATUS_OK;
+
 /* Map Open-Meteo weather code to a single Unicode symbol (UTF-8).
  * `is_day`: 1=day, 0=night, -1 unknown. */
 static void icon_for_code(int code, int is_day, char *out, size_t outsz) {
@@ -65,7 +75,10 @@ void fetch_weather(Weather *w, const char *stop_name) {
     if (!w) return;
 
     time_t now = time(NULL);
-    if (w->last_fetch && difftime(now, w->last_fetch) < 600) return;
+    if (w->last_fetch && difftime(now, w->last_fetch) < 600) {
+        g_weather_last_status = WEATHER_STATUS_THROTTLED;
+        return;
+    }
 
     /* Location: STOP_LAT/STOP_LON only, else NYC default. */
     if (fabs(w->lat) < 0.001 || fabs(w->lon) < 0.001) {
@@ -89,7 +102,7 @@ void fetch_weather(Weather *w, const char *stop_name) {
     char *json = http_get(url);
     if (!json) {
         logf_("Weather: fetch failed (no response from API)");
-        w->have = 0;
+        g_weather_last_status = WEATHER_STATUS_HTTP_FAIL;
         return;
     }
 
@@ -97,7 +110,7 @@ void fetch_weather(Weather *w, const char *stop_name) {
     free(json);
     if (!root) {
         logf_("Weather: invalid JSON from API");
-        w->have = 0;
+        g_weather_last_status = WEATHER_STATUS_JSON_FAIL;
         return;
     }
 
@@ -105,7 +118,7 @@ void fetch_weather(Weather *w, const char *stop_name) {
     if (!cur) {
         logf_("Weather: API response missing 'current'");
         cJSON_Delete(root);
-        w->have = 0;
+        g_weather_last_status = WEATHER_STATUS_SCHEMA_FAIL;
         return;
     }
     int temp = jint(jgeto(cur, "temperature_2m"), -999);
@@ -146,4 +159,20 @@ void fetch_weather(Weather *w, const char *stop_name) {
      * are updated and what values Open-Meteo returned. */
     logf_("Weather: fetched code=%d icon='%s' temp=%dF precip_prob=%d precip_in=%.2f moon_phase=%.2f",
           code, w->icon, w->temp_f, w->precip_prob, w->precip_in, w->moon_phase);
+    g_weather_last_status = WEATHER_STATUS_OK;
+}
+
+int weather_last_status(void) {
+    return g_weather_last_status;
+}
+
+const char *weather_last_status_str(void) {
+    switch (g_weather_last_status) {
+        case WEATHER_STATUS_OK: return "OK";
+        case WEATHER_STATUS_THROTTLED: return "THROTTLED";
+        case WEATHER_STATUS_HTTP_FAIL: return "HTTP_FAIL";
+        case WEATHER_STATUS_JSON_FAIL: return "JSON_FAIL";
+        case WEATHER_STATUS_SCHEMA_FAIL: return "SCHEMA_FAIL";
+        default: return "UNKNOWN";
+    }
 }

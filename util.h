@@ -4,8 +4,10 @@
  */
 #pragma once
 
+#include "types.h"
 #include <cjson/cJSON.h>
 #include <stddef.h>
+#include <time.h>
 
 /* Clamp integer v to [lo, hi]. */
 int clampi(int v, int lo, int hi);
@@ -27,6 +29,14 @@ char *http_get(const char *url);
 
 /* Return 1 if route is an Express route (QM*, BM*, BxM*, X*). */
 int is_express_route(const char *route);
+
+/* Recompute each arrival's mins from expected vs now (call every frame or before render).
+ * Keeps countdown accurate between MTA polls and when HTTP fails but last snapshot is kept.
+ * Drops arrivals whose expected time is more than 90s in the past; returns new count. */
+int arrivals_refresh_eta(Arrival *arr, int n, time_t now);
+
+/* Set process TZ to America/New_York and call tzset(). Idempotent. */
+void tz_set_ny(void);
 
 /* --- JSON helpers (return NULL or default; do not free the returned pointers) --- */
 const cJSON *jgeto(const cJSON *o, const char *k);   /* get object member */

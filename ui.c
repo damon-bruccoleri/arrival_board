@@ -13,12 +13,14 @@
 
 #define STEAM_PUFFS  2
 #define STEAM_SPHERE_OFFSET 60
+#define EYE_RADIUS_SCALE  18
+#define EYE_PULSE_HZ      (2.2f * 2.0f / 15.0f)
+#define EYE_ALPHA_LO      140
+#define EYE_ALPHA_HI      240
+#define FLIP_DURATION_MS  1000
 
-typedef struct SteamPuff {
-    float x, y;
-    float alpha;
-    float scale;
-    float rise;
+typedef struct {
+    float x, y, alpha, scale, rise;
 } SteamPuff;
 
 typedef struct {
@@ -26,14 +28,20 @@ typedef struct {
     int dx, dy;
 } EyeLayout;
 
-#define EYE_RADIUS_SCALE  18
-#define EYE_PULSE_HZ      (2.2f * 2.0f / 15.0f)
-#define EYE_ALPHA_LO      140
-#define EYE_ALPHA_HI      240
+typedef struct {
+    SDL_Texture *tex_display;
+    SDL_Texture *tex_prev;
+    int animating;
+    float anim_t;
+    float delay_ms;
+} FlipPart;
 
-    /* Mechanical flip: duration and ease-in (split goes 1 -> 0). */
-/* 1.0s drop time for the split curve. */
-#define FLIP_DURATION_MS  1000
+typedef struct {
+    FlipPart left;
+    FlipPart right;
+    Arrival last_arrival;
+    int valid;
+} TileFlipState;
 
 /* Palette: distinct colors for route names. Same route => same color (real-time and scheduled). Regular and express share palette. */
 #define ROUTE_PALETTE_SIZE 48
@@ -256,7 +264,7 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
     const float exhaust_img_y[STEAM_PUFFS] = { 0.88f, 0.88f };
     const float rise_speed = 4.4f;
     const float fade_speed = 0.28f;
-    const float scale_grow = 0.0012f;
+    const float scale_grow = 0.012f;
     const float puff_size_mult = 2.f;
     const float start_alpha = 64.f;
     const float origin_dx[STEAM_PUFFS] = { -85.f, 280.f };   /* -10px x each */
@@ -270,7 +278,7 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
             puffs[i].x = ex_x + (float)((i * 17) % 21 - 10);
             puffs[i].y = ex_y + (float)((i * 11) % 12);
             puffs[i].alpha = start_alpha;
-            puffs[i].scale = 0.7f + (float)(i % 3) * 0.1f;
+            puffs[i].scale = 0.35f + (float)(i % 3) * 0.05f;
             puffs[i].rise = rise_speed + (float)(i % 2) * 1.2f;
         }
         init = 1;
@@ -305,7 +313,7 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
             puffs[i].x = ex_x + (float)((i * 17) % 21 - 10);
             puffs[i].y = ex_y + (float)((i * 11) % 12);
             puffs[i].alpha = start_alpha;
-            puffs[i].scale = 0.6f + (float)(i % 3) * 0.1f;
+            puffs[i].scale = 0.30f + (float)(i % 3) * 0.05f;
             puffs[i].rise = rise_speed + (float)(i % 2) * 1.0f;
         }
 
@@ -532,8 +540,7 @@ static void draw_footer(SDL_Renderer *r, Fonts *f, int W, int H,
 
 /* Format scheduled when (America/New_York): today = "2:30 PM", tomorrow = "tomorrow 2:30 PM", else "Wed 2:30 PM". */
 static void format_scheduled_time(time_t when, char *buf, size_t bufsz) {
-    setenv("TZ", "America/New_York", 1);
-    tzset();
+    tz_set_ny();
     time_t now = time(NULL);
     struct tm tm_when, tm_now;
     localtime_r(&when, &tm_when);
@@ -593,6 +600,53 @@ static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const Schedul
     draw_text(r, f->tile_small, line2, x, y2, dim, 0);
 }
 
+static void flip_part_advance(FlipPart *fp, float dt_ms, int *ended) {
+    if (!fp->animating) return;
+    if (fp->delay_ms > 0.f) {
+        fp->delay_ms -= dt_ms;
+        if (fp->delay_ms < 0.f) fp->delay_ms = 0.f;
+        return;
+    }
+    float t = fp->anim_t + dt_ms / (float)FLIP_DURATION_MS;
+    if (t >= 1.f) { t = 1.f; fp->animating = 0; *ended = 1; }
+    fp->anim_t = t;
+}
+
+static void flip_part_start(FlipPart *fp) {
+    SDL_Texture *tmp = fp->tex_prev;
+    fp->tex_prev = fp->tex_display;
+    fp->tex_display = tmp;
+    fp->animating = 1;
+    fp->anim_t = 0.f;
+    fp->delay_ms = 200.f;
+}
+
+static void flip_part_destroy(FlipPart *fp) {
+    if (fp->tex_display) { SDL_DestroyTexture(fp->tex_display); fp->tex_display = NULL; }
+    if (fp->tex_prev)    { SDL_DestroyTexture(fp->tex_prev);    fp->tex_prev = NULL; }
+    fp->animating = 0;
+    fp->delay_ms = 0.f;
+}
+
+static void draw_flip_parallelogram(SDL_Renderer *r, SDL_Texture *tex,
+                                    SDL_Rect rect, int tile_h, float anim_t) {
+    float revealed = anim_t * anim_t * anim_t;
+    int h_new = clampi((int)(revealed * (float)tile_h + 0.5f), 0, tile_h);
+    int h_draw = (h_new > 0) ? h_new : 5;
+    if (h_draw > tile_h) h_draw = tile_h;
+    float skew = 100.f * (1.f - anim_t * anim_t * anim_t);
+    float v = (tile_h > 0) ? ((float)h_draw / (float)tile_h) : 1.f;
+    if (v > 1.f) v = 1.f;
+    SDL_Vertex verts[4] = {
+        { { (float)rect.x,              (float)rect.y },               { 255,255,255,255 }, { 0.f, 0.f } },
+        { { (float)(rect.x + rect.w),   (float)rect.y },               { 255,255,255,255 }, { 1.f, 0.f } },
+        { { (float)(rect.x + rect.w) + skew, (float)(rect.y + h_draw) }, { 255,255,255,255 }, { 1.f, v } },
+        { { (float)rect.x + skew,       (float)(rect.y + h_draw) },    { 255,255,255,255 }, { 0.f, v } },
+    };
+    int indices[] = { 0, 1, 2, 0, 2, 3 };
+    SDL_RenderGeometry(r, tex, verts, 4, indices, 6);
+}
+
 static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int body_h,
                            int pad, Arrival *arr, int n,
                            ScheduledDeparture *scheduled, int ns, float scale,
@@ -603,7 +657,6 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
 
     const int cols = TILE_COLS_FIXED;
     const int rows = TILE_ROWS_FIXED;
-    /* Slot positions for 11 visible tiles (slot 11 = bottom-right is empty for logo). */
     static const int slot_col[11] = { 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0 };
     static const int slot_row[11] = { 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5 };
 
@@ -617,19 +670,7 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
     if (n < realtime_count) realtime_count = n;
     if (realtime_count < 0) realtime_count = 0;
 
-    /* Per-slot, per-part flip state (realtime tiles only). */
-    static SDL_Texture *tex_left_display[TILE_SLOTS_MAX];
-    static SDL_Texture *tex_left_prev[TILE_SLOTS_MAX];
-    static SDL_Texture *tex_right_display[TILE_SLOTS_MAX];
-    static SDL_Texture *tex_right_prev[TILE_SLOTS_MAX];
-    static Arrival last_arrival[TILE_SLOTS_MAX];
-    static int last_valid[TILE_SLOTS_MAX];
-    static int left_animating[TILE_SLOTS_MAX];
-    static float left_anim_t[TILE_SLOTS_MAX];
-    static float left_anim_delay_ms[TILE_SLOTS_MAX];  /* hold t=0 for 0.2s before animating */
-    static int right_animating[TILE_SLOTS_MAX];
-    static float right_anim_t[TILE_SLOTS_MAX];
-    static float right_anim_delay_ms[TILE_SLOTS_MAX];
+    static TileFlipState slots[TILE_SLOTS_MAX];
     static int last_tile_w, last_tile_h;
     static Uint32 last_flip_ticks;
     int flip_ended_this_frame = 0;
@@ -638,203 +679,105 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
     last_flip_ticks = now;
     if (dt_ms <= 0.f || dt_ms > 200.f) dt_ms = 16.f;
 
-    /* Recreate part textures if size changed (run once per frame). */
     if (tile_w != last_tile_w || tile_h != last_tile_h) {
         for (int j = 0; j < TILE_SLOTS_MAX; j++) {
-            if (tex_left_display[j])  { SDL_DestroyTexture(tex_left_display[j]);  tex_left_display[j] = NULL; }
-            if (tex_left_prev[j])    { SDL_DestroyTexture(tex_left_prev[j]);    tex_left_prev[j] = NULL; }
-            if (tex_right_display[j]) { SDL_DestroyTexture(tex_right_display[j]); tex_right_display[j] = NULL; }
-            if (tex_right_prev[j])   { SDL_DestroyTexture(tex_right_prev[j]);   tex_right_prev[j] = NULL; }
-            left_animating[j] = right_animating[j] = 0;
-            left_anim_delay_ms[j] = right_anim_delay_ms[j] = 0.f;
+            flip_part_destroy(&slots[j].left);
+            flip_part_destroy(&slots[j].right);
         }
         last_tile_w = tile_w;
         last_tile_h = tile_h;
     }
 
     for (int i = 0; i < realtime_count; i++) {
+        TileFlipState *slot = &slots[i];
         int c = slot_col[i];
         int rr = slot_row[i];
-        SDL_Rect trc = {
-            pad + c * (tile_w + gap),
-            body_y + rr * (tile_h + gap),
-            tile_w,
-            tile_h
-        };
+        SDL_Rect trc = { pad + c * (tile_w + gap), body_y + rr * (tile_h + gap), tile_w, tile_h };
         SDL_Rect left_rect, right_rect;
         tile_split_rects(trc, scale, f, &left_rect, &right_rect);
         int left_w = left_rect.w;
         int right_w = right_rect.w;
 
-        /* Ensure we have render targets for this slot. */
-        if (!tex_left_display[i]) {
-            tex_left_display[i]  = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, left_w, tile_h);
-            tex_left_prev[i]     = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, left_w, tile_h);
-            tex_right_display[i] = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, right_w, tile_h);
-            tex_right_prev[i]    = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, right_w, tile_h);
-            if (!tex_left_display[i] || !tex_left_prev[i] || !tex_right_display[i] || !tex_right_prev[i]) continue;
-            /* So transparent areas (e.g. left tile when using WideTile) show content behind. */
-            SDL_SetTextureBlendMode(tex_left_display[i], SDL_BLENDMODE_BLEND);
-            SDL_SetTextureBlendMode(tex_left_prev[i], SDL_BLENDMODE_BLEND);
-            SDL_SetTextureBlendMode(tex_right_display[i], SDL_BLENDMODE_BLEND);
-            SDL_SetTextureBlendMode(tex_right_prev[i], SDL_BLENDMODE_BLEND);
-            /* Clear prev textures to transparent so they are never drawn uninitialized. */
+        if (!slot->left.tex_display) {
+            slot->left.tex_display  = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, left_w, tile_h);
+            slot->left.tex_prev     = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, left_w, tile_h);
+            slot->right.tex_display = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, right_w, tile_h);
+            slot->right.tex_prev    = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, right_w, tile_h);
+            if (!slot->left.tex_display || !slot->left.tex_prev ||
+                !slot->right.tex_display || !slot->right.tex_prev) continue;
+            SDL_SetTextureBlendMode(slot->left.tex_display, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureBlendMode(slot->left.tex_prev, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureBlendMode(slot->right.tex_display, SDL_BLENDMODE_BLEND);
+            SDL_SetTextureBlendMode(slot->right.tex_prev, SDL_BLENDMODE_BLEND);
             for (int j = 0; j < 2; j++) {
-                SDL_Texture *p = j ? tex_right_prev[i] : tex_left_prev[i];
+                SDL_Texture *p = j ? slot->right.tex_prev : slot->left.tex_prev;
                 SDL_SetRenderTarget(r, p);
                 SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
                 SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
                 SDL_RenderClear(r);
                 SDL_SetRenderTarget(r, NULL);
             }
-            last_valid[i] = 0;
+            slot->valid = 0;
         }
 
         int left_chg = 0;
-        int right_chg = last_valid[i] ? arrival_right_changed(&arr[i], &last_arrival[i]) : 1;
-        /* Left tile only flips when time changed; then check if left info also changed. */
+        int right_chg = slot->valid ? arrival_right_changed(&arr[i], &slot->last_arrival) : 1;
         if (right_chg)
-            left_chg = arrival_left_changed(&arr[i], &last_arrival[i]);
-        last_arrival[i] = arr[i];
-        last_valid[i] = 1;
+            left_chg = arrival_left_changed(&arr[i], &slot->last_arrival);
+        slot->last_arrival = arr[i];
+        slot->valid = 1;
 
-        /* Draw WideTile under the left part (above other layers, below text) for both static and flip. */
         if (wide_tile_tex) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, wide_tile_tex, NULL, &left_rect);
         }
-        /* Draw NarrowTile under the right part. */
         if (narrow_tile_tex) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, narrow_tile_tex, NULL, &right_rect);
         }
 
-        /* --- Draw LEFT part --- */
-        if (left_animating[i]) {
-            /* Hold at t=0 for 0.2s before starting the GPU animation. */
-            if (left_anim_delay_ms[i] > 0.f) {
-                left_anim_delay_ms[i] -= dt_ms;
-                if (left_anim_delay_ms[i] < 0.f) left_anim_delay_ms[i] = 0.f;
-            } else {
-                float t = left_anim_t[i] + dt_ms / (float)FLIP_DURATION_MS;
-                if (t >= 1.f) { t = 1.f; left_animating[i] = 0; flip_ended_this_frame = 1; }
-                left_anim_t[i] = t;
-            }
-            float t = left_anim_t[i];
-            float revealed = t * t * t;
-            int h_new = (int)(revealed * (float)tile_h + 0.5f);
-            if (h_new > tile_h) h_new = tile_h;
-            if (h_new < 0) h_new = 0;
-
+        /* Left part */
+        flip_part_advance(&slot->left, dt_ms, &flip_ended_this_frame);
+        if (slot->left.animating) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, tex_left_prev[i], NULL, &left_rect);
-            /* Quad uses minimum height 5px so the parallelogram is never degenerate on the first frame. */
-            int h_draw = (h_new > 0) ? h_new : 5;
-            if (h_draw > tile_h) h_draw = tile_h;
-            {
-                /* New tile: parallelogram; use only the revealed height in texture so the strip shows
-                 * the top of the tile. Quad geometry skews the texture so image fits the parallelogram. */
-                float skew = 100.f * (1.f - t * t * t);
-                float v = (tile_h > 0) ? ((float)h_draw / (float)tile_h) : 1.f;
-                if (v > 1.f) v = 1.f;
-                SDL_Vertex verts[4] = {
-                    { { (float)left_rect.x,                 (float)left_rect.y },          { 255,255,255,255 }, { 0.f, 0.f } },
-                    { { (float)(left_rect.x + left_rect.w), (float)left_rect.y },          { 255,255,255,255 }, { 1.f, 0.f } },
-                    { { (float)(left_rect.x + left_rect.w) + skew, (float)(left_rect.y + h_draw) }, { 255,255,255,255 }, { 1.f, v } },
-                    { { (float)left_rect.x + skew,          (float)(left_rect.y + h_draw) }, { 255,255,255,255 }, { 0.f, v } },
-                };
-                int indices[] = { 0, 1, 2, 0, 2, 3 };
-                SDL_RenderGeometry(r, tex_left_display[i], verts, 4, indices, 6);
-            }
+            SDL_RenderCopy(r, slot->left.tex_prev, NULL, &left_rect);
+            draw_flip_parallelogram(r, slot->left.tex_display, left_rect, tile_h, slot->left.anim_t);
+        } else if (left_chg) {
+            flip_part_start(&slot->left);
+            render_left_to_texture(r, f, slot->left.tex_display, left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_RenderCopy(r, slot->left.tex_prev, NULL, &left_rect);
+        } else if (right_chg) {
+            render_left_to_texture(r, f, slot->left.tex_display, left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_RenderCopy(r, slot->left.tex_display, NULL, &left_rect);
         } else {
-            if (left_chg) {
-                SDL_Texture *tmp = tex_left_prev[i];
-                tex_left_prev[i] = tex_left_display[i];
-                tex_left_display[i] = tmp;
-                render_left_to_texture(r, f, tex_left_display[i], left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
-                left_animating[i] = 1;
-                left_anim_t[i] = 0.f;
-                left_anim_delay_ms[i] = 200.f;
-                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-                SDL_RenderCopy(r, tex_left_prev[i], NULL, &left_rect);
-            } else if (right_chg) {
-                /* Remaining time changed: update large tile text and show without animating. */
-                render_left_to_texture(r, f, tex_left_display[i], left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
-                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-                SDL_RenderCopy(r, tex_left_display[i], NULL, &left_rect);
-            } else {
-                /* No time change: do not change large tile text; just redraw existing. */
-                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-                SDL_RenderCopy(r, tex_left_display[i], NULL, &left_rect);
-            }
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_RenderCopy(r, slot->left.tex_display, NULL, &left_rect);
         }
 
-        /* --- Draw RIGHT part --- */
-        if (right_animating[i]) {
-            /* Hold at t=0 for 0.2s before starting the GPU animation. */
-            if (right_anim_delay_ms[i] > 0.f) {
-                right_anim_delay_ms[i] -= dt_ms;
-                if (right_anim_delay_ms[i] < 0.f) right_anim_delay_ms[i] = 0.f;
-            } else {
-                float t = right_anim_t[i] + dt_ms / (float)FLIP_DURATION_MS;
-                if (t >= 1.f) { t = 1.f; right_animating[i] = 0; flip_ended_this_frame = 1; }
-                right_anim_t[i] = t;
-            }
-            float t = right_anim_t[i];
-            float revealed = t * t * t;
-            int h_new = (int)(revealed * (float)tile_h + 0.5f);
-            if (h_new > tile_h) h_new = tile_h;
-            if (h_new < 0) h_new = 0;
-
+        /* Right part */
+        flip_part_advance(&slot->right, dt_ms, &flip_ended_this_frame);
+        if (slot->right.animating) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, tex_right_prev[i], NULL, &right_rect);
-            /* Quad uses minimum height 5px so the parallelogram is never degenerate on the first frame. */
-            int h_draw = (h_new > 0) ? h_new : 5;
-            if (h_draw > tile_h) h_draw = tile_h;
-            {
-                /* Right part: same parallelogram; revealed height v so strip shows top of tile, skewed. */
-                float skew = 100.f * (1.f - t * t * t);
-                float v = (tile_h > 0) ? ((float)h_draw / (float)tile_h) : 1.f;
-                if (v > 1.f) v = 1.f;
-                SDL_Vertex verts[4] = {
-                    { { (float)right_rect.x,                 (float)right_rect.y },          { 255,255,255,255 }, { 0.f, 0.f } },
-                    { { (float)(right_rect.x + right_rect.w), (float)right_rect.y },          { 255,255,255,255 }, { 1.f, 0.f } },
-                    { { (float)(right_rect.x + right_rect.w) + skew, (float)(right_rect.y + h_draw) }, { 255,255,255,255 }, { 1.f, v } },
-                    { { (float)right_rect.x + skew,          (float)(right_rect.y + h_draw) }, { 255,255,255,255 }, { 0.f, v } },
-                };
-                int indices[] = { 0, 1, 2, 0, 2, 3 };
-                SDL_RenderGeometry(r, tex_right_display[i], verts, 4, indices, 6);
-            }
+            SDL_RenderCopy(r, slot->right.tex_prev, NULL, &right_rect);
+            draw_flip_parallelogram(r, slot->right.tex_display, right_rect, tile_h, slot->right.anim_t);
+        } else if (right_chg) {
+            flip_part_start(&slot->right);
+            render_right_to_texture(r, f, slot->right.tex_display, right_w, tile_h, &arr[i], scale, white, dim, radius, narrow_tile_tex);
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_RenderCopy(r, slot->right.tex_prev, NULL, &right_rect);
         } else {
-            if (right_chg) {
-                SDL_Texture *tmp = tex_right_prev[i];
-                tex_right_prev[i] = tex_right_display[i];
-                tex_right_display[i] = tmp;
-                render_right_to_texture(r, f, tex_right_display[i], right_w, tile_h, &arr[i], scale, white, dim, radius, narrow_tile_tex);
-                right_animating[i] = 1;
-                right_anim_t[i] = 0.f;
-                right_anim_delay_ms[i] = 200.f;
-                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-                SDL_RenderCopy(r, tex_right_prev[i], NULL, &right_rect);
-            } else {
-                /* Time unchanged: just redraw existing right tile. */
-                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-                SDL_RenderCopy(r, tex_right_display[i], NULL, &right_rect);
-            }
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_RenderCopy(r, slot->right.tex_display, NULL, &right_rect);
         }
     }
 
-    /* Scheduled tiles: bottom slots, grow up. */
     for (int i = 0; i < scheduled_count; i++) {
         int slot_idx = TILE_SLOTS_VISIBLE - scheduled_count + i;
         int c = slot_col[slot_idx];
         int rr = slot_row[slot_idx];
-        SDL_Rect trc = {
-            pad + c * (tile_w + gap),
-            body_y + rr * (tile_h + gap),
-            tile_w,
-            tile_h
-        };
+        SDL_Rect trc = { pad + c * (tile_w + gap), body_y + rr * (tile_h + gap), tile_w, tile_h };
         if (wide_tile_tex) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, wide_tile_tex, NULL, &trc);

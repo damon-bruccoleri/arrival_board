@@ -7,10 +7,35 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <time.h>
+#include <unistd.h>
+#include <sys/wait.h>
 
 int clampi(int v, int lo, int hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
+}
+
+void tz_set_ny(void) {
+    setenv("TZ", "America/New_York", 1);
+    tzset();
+}
+
+int arrivals_refresh_eta(Arrival *arr, int n, time_t now) {
+    if (!arr || n <= 0) return 0;
+    int out = 0;
+    for (int i = 0; i < n; i++) {
+        if (arr[i].expected > 0) {
+            double d = difftime(arr[i].expected, now);
+            if (d < -90.0) continue;
+            int mins = (int)lrint(d / 60.0);
+            if (mins < 0) mins = 0;
+            arr[i].mins = mins;
+        }
+        if (out != i) arr[out] = arr[i];
+        out++;
+    }
+    return out;
 }
 
 float layout_scale(int screen_height) {
@@ -65,10 +90,14 @@ void urlencode(char *out, size_t outsz, const char *in) {
     out[o] = '\0';
 }
 
-char *http_get(const char *url) {
+/* Single attempt: run curl (new process = fresh connection). Returns malloc'd string or NULL. */
+static char *http_get_one(const char *url) {
     if (!url) return NULL;
     char cmd[2048];
-    snprintf(cmd, sizeof(cmd), "curl -fsSL --connect-timeout 4 --max-time 8 '%s'", url);
+    /* MTA/Open-Meteo can be slow; 504/timeouts were common at 8s. Longer limits + retries for transient errors. */
+    snprintf(cmd, sizeof(cmd),
+             "curl -fsSL --connect-timeout 15 --max-time 45 --retry 3 --retry-delay 2 --retry-connrefused '%s'",
+             url);
     FILE *fp = popen(cmd, "r");
     if (!fp) return NULL;
 
@@ -88,7 +117,28 @@ char *http_get(const char *url) {
         buf[len++] = (char)ch;
     }
     buf[len] = '\0';
-    pclose(fp);
+    int rc = pclose(fp);
+    if (rc != 0) {
+        if (WIFEXITED(rc))
+            logf_("HTTP_GET_FAIL url=%s exit=%d", url, WEXITSTATUS(rc));
+        else if (WIFSIGNALED(rc))
+            logf_("HTTP_GET_FAIL url=%s signal=%d", url, WTERMSIG(rc));
+        else
+            logf_("HTTP_GET_FAIL url=%s rc=%d", url, rc);
+        free(buf);
+        return NULL;
+    }
+    return buf;
+}
+
+/* Fetch URL with retries to recover from stale/failed connections. Up to 3 attempts, 2s between. */
+char *http_get(const char *url) {
+    if (!url) return NULL;
+    char *buf = http_get_one(url);
+    for (int attempt = 0; !buf && attempt < 2; attempt++) {
+        sleep(2);
+        buf = http_get_one(url);
+    }
     return buf;
 }
 

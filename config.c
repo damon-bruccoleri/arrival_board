@@ -20,65 +20,63 @@ static void resolve_absolute(char *path, size_t sz) {
         snprintf(path, sz, "%s", abs_buf);
 }
 
+static void env_str(char *dst, size_t dstsz, const char *key, const char *fallback) {
+    const char *v = getenv(key);
+    if (v && *v)
+        snprintf(dst, dstsz, "%s", v);
+    else if (fallback)
+        snprintf(dst, dstsz, "%s", fallback);
+}
+
+static void env_font(char *dst, size_t dstsz, const char *key, const char *fallback) {
+    const char *v = getenv(key);
+    if (v && *v && access(v, R_OK) == 0)
+        snprintf(dst, dstsz, "%s", v);
+    else if (fallback)
+        snprintf(dst, dstsz, "%s", fallback);
+}
+
+static int env_int(const char *key, int fallback, int lo, int hi) {
+    const char *v = getenv(key);
+    int val = (v && *v) ? atoi(v) : fallback;
+    return clampi(val, lo, hi);
+}
+
+static void resolve_audio_path(char *dst, size_t dstsz, const char *rel) {
+    snprintf(dst, dstsz, "%s/arrival_board/%s", home_dir(), rel);
+    if (access(dst, R_OK) != 0) dst[0] = '\0';
+    resolve_absolute(dst, dstsz);
+}
+
 void config_from_env(AppConfig *cfg) {
     if (!cfg) return;
     memset(cfg, 0, sizeof(*cfg));
 
-    /* Body font: FONT_PATH env if set and readable, else single default. No fallback. */
-    const char *font_path = getenv("FONT_PATH");
-    if (font_path && *font_path && access(font_path, R_OK) == 0)
-        snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", font_path);
-    else
-        snprintf(cfg->font_path, sizeof(cfg->font_path), "%s", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
+    env_font(cfg->font_path, sizeof(cfg->font_path), "FONT_PATH",
+             "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf");
 
-    /* Title font: TITLE_FONT_PATH only. No fallback chain. If unset, empty. */
-    const char *title_font = getenv("TITLE_FONT_PATH");
-    if (title_font && *title_font && access(title_font, R_OK) == 0)
-        snprintf(cfg->title_font_path, sizeof(cfg->title_font_path), "%s", title_font);
-    else
-        cfg->title_font_path[0] = '\0';
+    env_font(cfg->title_font_path, sizeof(cfg->title_font_path), "TITLE_FONT_PATH", NULL);
     resolve_absolute(cfg->title_font_path, sizeof(cfg->title_font_path));
     if (cfg->title_font_path[0])
         logf_("Title font path: %s", cfg->title_font_path);
 
-    /* Symbol font: SYMBOL_FONT_PATH env if set and readable, else single default. No fallback. */
-    const char *sym = getenv("SYMBOL_FONT_PATH");
-    if (sym && *sym && access(sym, R_OK) == 0)
-        snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", sym);
-    else
-        snprintf(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "%s", "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf");
+    env_font(cfg->symbol_font_path, sizeof(cfg->symbol_font_path), "SYMBOL_FONT_PATH",
+             "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf");
 
-    /* Emoji font: EMOJI_FONT_PATH env if set and readable, else single default. No fallback; keep path even if missing so error can report it. */
-    const char *emoji = getenv("EMOJI_FONT_PATH");
-    if (emoji && *emoji && access(emoji, R_OK) == 0)
-        snprintf(cfg->emoji_font_path, sizeof(cfg->emoji_font_path), "%s", emoji);
-    else
-        snprintf(cfg->emoji_font_path, sizeof(cfg->emoji_font_path), "%s", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf");
+    env_font(cfg->emoji_font_path, sizeof(cfg->emoji_font_path), "EMOJI_FONT_PATH",
+             "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf");
 
-    const char *mta_key = getenv("MTA_KEY");
-    if (mta_key) snprintf(cfg->mta_key, sizeof(cfg->mta_key), "%s", mta_key);
-    const char *stop_id = getenv("STOP_ID");
-    if (stop_id) snprintf(cfg->stop_id, sizeof(cfg->stop_id), "%s", stop_id);
-    const char *route_filter = getenv("ROUTE_FILTER");
-    if (route_filter) snprintf(cfg->route_filter, sizeof(cfg->route_filter), "%s", route_filter);
+    env_str(cfg->mta_key, sizeof(cfg->mta_key), "MTA_KEY", NULL);
+    env_str(cfg->stop_id, sizeof(cfg->stop_id), "STOP_ID", NULL);
+    env_str(cfg->route_filter, sizeof(cfg->route_filter), "ROUTE_FILTER", NULL);
+    env_str(cfg->stop_name_override, sizeof(cfg->stop_name_override), "STOP_NAME", NULL);
+    env_str(cfg->aplay_device, sizeof(cfg->aplay_device), "APLAY_DEVICE", NULL);
 
-    int poll = 10;
-    const char *poll_s = getenv("POLL_SECONDS");
-    if (poll_s && *poll_s) poll = atoi(poll_s);
-    cfg->poll_seconds = poll < 5 ? 5 : poll;
+    cfg->poll_seconds = env_int("POLL_SECONDS", 10, 5, 3600);
+    cfg->max_tiles = env_int("MAX_TILES", 12, 1, 24);
 
-    int max_tiles = 12;
-    const char *max_s = getenv("MAX_TILES");
-    if (max_s && *max_s) max_tiles = atoi(max_s);
-    cfg->max_tiles = clampi(max_tiles, 1, 24);
-
-    const char *stop_name_override = getenv("STOP_NAME");
-    if (stop_name_override && *stop_name_override)
-        snprintf(cfg->stop_name_override, sizeof(cfg->stop_name_override), "%s", stop_name_override);
-
-    const char *gtfs_url = getenv("GTFS_BUS_URL");
-    if (!gtfs_url || !*gtfs_url) gtfs_url = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_busco.zip";
-    snprintf(cfg->gtfs_url, sizeof(cfg->gtfs_url), "%s", gtfs_url);
+    env_str(cfg->gtfs_url, sizeof(cfg->gtfs_url), "GTFS_BUS_URL",
+            "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_busco.zip");
 
     const char *gtfs_cache_env = getenv("GTFS_CACHE_PATH");
     if (gtfs_cache_env && *gtfs_cache_env)
@@ -86,21 +84,7 @@ void config_from_env(AppConfig *cfg) {
     else
         snprintf(cfg->gtfs_cache, sizeof(cfg->gtfs_cache), "%s/arrival_board/gtfs_bus_cache.zip", home_dir());
 
-    const char *aplay_dev = getenv("APLAY_DEVICE");
-    if (aplay_dev) snprintf(cfg->aplay_device, sizeof(cfg->aplay_device), "%s", aplay_dev);
-
-    /* Music path: single default under HOME/tools. */
-    snprintf(cfg->music_path, sizeof(cfg->music_path), "%s/arrival_board/tools/Seaport_Steampunk_Final_Mix.wav", home_dir());
-    if (access(cfg->music_path, R_OK) != 0) cfg->music_path[0] = '\0';
-
-    /* Ferry (second loop): single default path. */
-    snprintf(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), "%s/arrival_board/tools/SI Ferry.wav", home_dir());
-    if (access(cfg->music_loop2_path, R_OK) != 0) cfg->music_loop2_path[0] = '\0';
-    resolve_absolute(cfg->music_path, sizeof(cfg->music_path));
-    resolve_absolute(cfg->music_loop2_path, sizeof(cfg->music_loop2_path));
-
-    /* Flip sound: single default path. */
-    snprintf(cfg->flip_path, sizeof(cfg->flip_path), "%s/arrival_board/tools/ddsm.wav", home_dir());
-    if (access(cfg->flip_path, R_OK) != 0) cfg->flip_path[0] = '\0';
-    resolve_absolute(cfg->flip_path, sizeof(cfg->flip_path));
+    resolve_audio_path(cfg->music_path, sizeof(cfg->music_path), "tools/Seaport_Steampunk_Final_Mix.wav");
+    resolve_audio_path(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), "tools/SI Ferry.wav");
+    resolve_audio_path(cfg->flip_path, sizeof(cfg->flip_path), "tools/ddsm.wav");
 }

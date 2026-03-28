@@ -11,11 +11,9 @@
 #include <string.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <sys/stat.h>
 
 static pid_t music_pid = -1;
 static pid_t ferry_pid = -1;
-static char mixed_path_buf[512]; /* sox mixed file; unlink on stop */
 
 /* Parse RIFF WAV and return duration in seconds; -1 on error. */
 int audio_wav_duration_seconds(const char *path) {
@@ -71,14 +69,17 @@ void audio_play_flip(const char *flip_path, const char *aplay_device) {
                 flip_path, aplay_device && aplay_device[0] ? aplay_device : "(paplay)");
 
     if (!aplay_device || !aplay_device[0]) {
-        /* Pulse path: paplay in background, mixes with music */
+        /* Pulse path: play in background, mixes with music. Boost volume with sox when available so it's very audible. */
         pid_t pid = fork();
         if (pid < 0) return;
         if (pid == 0) {
             (void)freopen("/dev/null", "r", stdin);
             (void)freopen("/dev/null", "w", stdout);
             if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
-            execl("/bin/sh", "sh", "-c", "command -v paplay >/dev/null 2>&1 && paplay \"$1\" 2>/dev/null &", "sh", flip_path, (char *)NULL);
+            /* sox -v 10.0 boosts level; fallback to paplay alone if sox missing */
+            execl("/bin/sh", "sh", "-c",
+                  "command -v paplay >/dev/null 2>&1 && ( command -v sox >/dev/null 2>&1 && sox -q -v 10.0 \"$1\" -t wav - 2>/dev/null | paplay 2>/dev/null & ) || ( paplay \"$1\" 2>/dev/null & )",
+                  "sh", flip_path, (char *)NULL);
             _exit(127);
         }
         (void)waitpid(pid, NULL, WNOHANG);
@@ -96,11 +97,11 @@ void audio_play_flip(const char *flip_path, const char *aplay_device) {
         if (audio_debug) {
             /* Show aplay/sox errors when troubleshooting */
             if (execl("/bin/sh", "sh", "-c",
-                      "( command -v sox >/dev/null 2>&1 && sox -q -v 5.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - ) || aplay -q -D \"$2\" \"$1\"",
+                      "( command -v sox >/dev/null 2>&1 && sox -q -v 10.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - ) || aplay -q -D \"$2\" \"$1\"",
                       "sh", flip_path, aplay_device, (char *)NULL) < 0)
                 _exit(127);
         } else if (execl("/bin/sh", "sh", "-c",
-                  "( command -v sox >/dev/null 2>&1 && sox -q -v 5.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - 2>/dev/null ) || aplay -q -D \"$2\" \"$1\" 2>/dev/null",
+                  "( command -v sox >/dev/null 2>&1 && sox -q -v 10.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - 2>/dev/null ) || aplay -q -D \"$2\" \"$1\" 2>/dev/null",
                   "sh", flip_path, aplay_device, (char *)NULL) < 0)
             _exit(127);
         _exit(0);
@@ -113,7 +114,6 @@ void audio_start_music(const char *music_path, const char *music_loop2, const ch
 
     int audio_debug = (getenv("AUDIO_DEBUG") != NULL);
     int use_pulse = (!aplay_device || !aplay_device[0]);
-    mixed_path_buf[0] = '\0';
     ferry_pid = -1;
 
     /* Total cycle length 23s (music + gap). Ferry every 5th cycle. */
@@ -208,9 +208,5 @@ void audio_stop_music(void) {
         kill(music_pid, SIGTERM);
         waitpid(music_pid, NULL, WNOHANG);
         music_pid = -1;
-    }
-    if (mixed_path_buf[0]) {
-        (void)unlink(mixed_path_buf);
-        mixed_path_buf[0] = '\0';
     }
 }

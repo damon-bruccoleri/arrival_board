@@ -15,3 +15,7 @@ void gtfs_load(const char *gtfs_url, const char *cache_path);
  * out: filled with up to SCHEDULED_MAX entries, 1 per route. Returns count. */
 int gtfs_next_departures(const char *stop_id, const char *realtime_routes,
                          ScheduledDeparture *out, int max_out);
+
+/* Last GTFS load status for debug instrumentation. */
+int gtfs_last_status(void);
+const char *gtfs_last_status_str(void);
