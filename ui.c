@@ -17,7 +17,9 @@
 #define EYE_PULSE_HZ      (2.2f * 2.0f / 15.0f)
 #define EYE_ALPHA_LO      140
 #define EYE_ALPHA_HI      240
-#define FLIP_DURATION_MS  1000
+#define FLIP_DURATION_MS  400
+#define FLIP_STAGGER_MS   80.f
+#define DIVIDER_H         2
 
 typedef struct {
     float x, y, alpha, scale, rise;
@@ -612,13 +614,13 @@ static void flip_part_advance(FlipPart *fp, float dt_ms, int *ended) {
     fp->anim_t = t;
 }
 
-static void flip_part_start(FlipPart *fp) {
+static void flip_part_start(FlipPart *fp, float stagger) {
     SDL_Texture *tmp = fp->tex_prev;
     fp->tex_prev = fp->tex_display;
     fp->tex_display = tmp;
     fp->animating = 1;
     fp->anim_t = 0.f;
-    fp->delay_ms = 200.f;
+    fp->delay_ms = 50.f + stagger;
 }
 
 static void flip_part_destroy(FlipPart *fp) {
@@ -628,23 +630,83 @@ static void flip_part_destroy(FlipPart *fp) {
     fp->delay_ms = 0.f;
 }
 
-static void draw_flip_parallelogram(SDL_Renderer *r, SDL_Texture *tex,
-                                    SDL_Rect rect, int tile_h, float anim_t) {
-    float revealed = anim_t * anim_t * anim_t;
-    int h_new = clampi((int)(revealed * (float)tile_h + 0.5f), 0, tile_h);
-    int h_draw = (h_new > 0) ? h_new : 5;
-    if (h_draw > tile_h) h_draw = tile_h;
-    float skew = 100.f * (1.f - anim_t * anim_t * anim_t);
-    float v = (tile_h > 0) ? ((float)h_draw / (float)tile_h) : 1.f;
-    if (v > 1.f) v = 1.f;
-    SDL_Vertex verts[4] = {
-        { { (float)rect.x,              (float)rect.y },               { 255,255,255,255 }, { 0.f, 0.f } },
-        { { (float)(rect.x + rect.w),   (float)rect.y },               { 255,255,255,255 }, { 1.f, 0.f } },
-        { { (float)(rect.x + rect.w) + skew, (float)(rect.y + h_draw) }, { 255,255,255,255 }, { 1.f, v } },
-        { { (float)rect.x + skew,       (float)(rect.y + h_draw) },    { 255,255,255,255 }, { 0.f, v } },
-    };
-    int indices[] = { 0, 1, 2, 0, 2, 3 };
-    SDL_RenderGeometry(r, tex, verts, 4, indices, 6);
+static void draw_center_divider(SDL_Renderer *r, SDL_Rect rect, int tile_h) {
+    int mid_y = rect.y + tile_h / 2;
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(r, 5, 5, 8, 180);
+    SDL_Rect div = { rect.x, mid_y - DIVIDER_H / 2, rect.w, DIVIDER_H };
+    SDL_RenderFillRect(r, &div);
+}
+
+/*
+ * Split-flap animation: the tile is split horizontally at the center.
+ * Phase 1 (t 0→0.5): top half of OLD flap rotates forward (compresses to 0 height).
+ *                     Bottom half still shows OLD.
+ * Phase 2 (t 0.5→1): top half of NEW flap falls into place (expands from 0).
+ *                     Bottom half switches to NEW.
+ * Mechanical bounce on landing: the flap overshoots slightly before settling.
+ */
+static void draw_split_flap(SDL_Renderer *r, SDL_Texture *tex_old, SDL_Texture *tex_new,
+                            SDL_Rect rect, int tile_h, float anim_t, float scale) {
+    int half_h = tile_h / 2;
+    int mid_y = rect.y + half_h;
+    int bot_h = tile_h - half_h;
+    float tex_w_f = (float)rect.w;
+
+    /* Source rects within the texture (texture coords are 0,0 based). */
+    SDL_Rect src_top = { 0, 0, rect.w, half_h };
+    SDL_Rect src_bot = { 0, half_h, rect.w, bot_h };
+
+    /* 1) Bottom half: old content until phase 2, then new. */
+    SDL_Rect dst_bot = { rect.x, mid_y, rect.w, bot_h };
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_RenderCopy(r, (anim_t < 0.5f) ? tex_old : tex_new, &src_bot, &dst_bot);
+
+    /* 2) Top half of new (static, visible once flap passes vertical). */
+    if (anim_t >= 0.5f) {
+        SDL_Rect dst_top = { rect.x, rect.y, rect.w, half_h };
+        SDL_RenderCopy(r, tex_new, &src_top, &dst_top);
+    } else {
+        SDL_Rect dst_top = { rect.x, rect.y, rect.w, half_h };
+        SDL_RenderCopy(r, tex_old, &src_top, &dst_top);
+    }
+
+    /* 3) Animated flap: compresses vertically at the hinge line (mid_y). */
+    float phase_t;
+    SDL_Texture *flap_tex;
+    if (anim_t < 0.5f) {
+        phase_t = 1.f - anim_t * 2.f;
+        flap_tex = tex_old;
+    } else {
+        phase_t = (anim_t - 0.5f) * 2.f;
+        flap_tex = tex_new;
+        /* Bounce: overshoot slightly, then settle. */
+        if (phase_t > 0.7f) {
+            float over = (phase_t - 0.7f) / 0.3f;
+            phase_t = 1.f + 0.08f * sinf(over * 3.14159f);
+        }
+    }
+    int flap_h = clampi((int)(phase_t * (float)half_h + 0.5f), 0, half_h + 4);
+    if (flap_h > 0) {
+        SDL_Rect dst_flap = { rect.x, mid_y - flap_h, rect.w, flap_h };
+        SDL_RenderCopy(r, flap_tex, &src_top, &dst_flap);
+    }
+
+    /* 4) Drop shadow under the flap while it's mid-rotation. */
+    if (flap_h > 0 && flap_h < half_h) {
+        int shadow_h = clampi((int)(6.f * scale), 2, 12);
+        int shadow_alpha = (int)(90.f * (1.f - (float)flap_h / (float)half_h));
+        if (shadow_alpha > 0) {
+            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(r, 0, 0, 0, (Uint8)shadow_alpha);
+            SDL_Rect shadow = { rect.x + 2, mid_y, rect.w - 4, shadow_h };
+            SDL_RenderFillRect(r, &shadow);
+        }
+    }
+
+    /* 5) Center divider at the hinge. */
+    (void)tex_w_f;
+    draw_center_divider(r, rect, tile_h);
 }
 
 static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int body_h,
@@ -736,40 +798,45 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
             SDL_RenderCopy(r, narrow_tile_tex, NULL, &right_rect);
         }
 
+        float stagger = (float)i * FLIP_STAGGER_MS;
+
         /* Left part */
         flip_part_advance(&slot->left, dt_ms, &flip_ended_this_frame);
         if (slot->left.animating) {
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, slot->left.tex_prev, NULL, &left_rect);
-            draw_flip_parallelogram(r, slot->left.tex_display, left_rect, tile_h, slot->left.anim_t);
+            draw_split_flap(r, slot->left.tex_prev, slot->left.tex_display,
+                            left_rect, tile_h, slot->left.anim_t, scale);
         } else if (left_chg) {
-            flip_part_start(&slot->left);
+            flip_part_start(&slot->left, stagger);
             render_left_to_texture(r, f, slot->left.tex_display, left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->left.tex_prev, NULL, &left_rect);
+            draw_center_divider(r, left_rect, tile_h);
         } else if (right_chg) {
             render_left_to_texture(r, f, slot->left.tex_display, left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->left.tex_display, NULL, &left_rect);
+            draw_center_divider(r, left_rect, tile_h);
         } else {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->left.tex_display, NULL, &left_rect);
+            draw_center_divider(r, left_rect, tile_h);
         }
 
         /* Right part */
         flip_part_advance(&slot->right, dt_ms, &flip_ended_this_frame);
         if (slot->right.animating) {
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, slot->right.tex_prev, NULL, &right_rect);
-            draw_flip_parallelogram(r, slot->right.tex_display, right_rect, tile_h, slot->right.anim_t);
+            draw_split_flap(r, slot->right.tex_prev, slot->right.tex_display,
+                            right_rect, tile_h, slot->right.anim_t, scale);
         } else if (right_chg) {
-            flip_part_start(&slot->right);
+            flip_part_start(&slot->right, stagger);
             render_right_to_texture(r, f, slot->right.tex_display, right_w, tile_h, &arr[i], scale, white, dim, radius, narrow_tile_tex);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->right.tex_prev, NULL, &right_rect);
+            draw_center_divider(r, right_rect, tile_h);
         } else {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->right.tex_display, NULL, &right_rect);
+            draw_center_divider(r, right_rect, tile_h);
         }
     }
 
@@ -783,6 +850,7 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
             SDL_RenderCopy(r, wide_tile_tex, NULL, &trc);
         }
         draw_scheduled_tile_content(r, f, &scheduled[i], trc, scale, radius, wide_tile_tex);
+        draw_center_divider(r, trc, tile_h);
     }
 
     if (flip_ended_this_frame && on_flip_ended)
