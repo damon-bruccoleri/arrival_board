@@ -17,9 +17,10 @@
 #define EYE_PULSE_HZ      (2.2f * 2.0f / 15.0f)
 #define EYE_ALPHA_LO      140
 #define EYE_ALPHA_HI      240
-#define FLIP_DURATION_MS  400
-#define FLIP_STAGGER_MS   80.f
-#define DIVIDER_H         2
+#define FLIP_DURATION_MS       520
+#define FLIP_STAGGER_MS        48.f
+#define DIVIDER_H              2
+#define FLIP_TILE_EDGE_MAX_PX  15
 
 typedef struct {
     float x, y, alpha, scale, rise;
@@ -638,74 +639,126 @@ static void draw_center_divider(SDL_Renderer *r, SDL_Rect rect, int tile_h) {
     SDL_RenderFillRect(r, &div);
 }
 
+/* Horizontal strip simulating the side of a thick tile (edge-on during flip). */
+static void draw_tile_thickness_edge(SDL_Renderer *r, int x, int y_center, int w,
+                                     int thick) {
+    if (thick < 1)
+        return;
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(r, 42, 42, 48, 238);
+    SDL_Rect e = { x, y_center - thick / 2, w, thick };
+    SDL_RenderFillRect(r, &e);
+}
+
+static int flip_edge_thickness_px(int flap_h, int segment_h, int max_px) {
+    if (segment_h < 1 || max_px < 1)
+        return 0;
+    float u = (float)flap_h / (float)segment_h;
+    if (u > 1.f)
+        u = 1.f;
+    return clampi((int)(max_px * sinf(3.14159265f * u) + 0.5f), 0, max_px);
+}
+
 /*
- * Split-flap animation: the tile is split horizontally at the center.
- * Phase 1 (t 0→0.5): top half of OLD flap rotates forward (compresses to 0 height).
- *                     Bottom half still shows OLD.
- * Phase 2 (t 0.5→1): top half of NEW flap falls into place (expands from 0).
- *                     Bottom half switches to NEW.
- * Mechanical bounce on landing: the flap overshoots slightly before settling.
+ * Split-flap animation: the tile is split horizontally at the center hinge.
+ *
+ * Phase 1 (t 0→0.5): OLD top-half flap falls forward, compressing toward the
+ *   center line. Behind it, the NEW top half is gradually revealed. The bottom
+ *   half remains OLD throughout.
+ *
+ * Phase 2 (t 0.5→1): The flap continues past vertical. Its back (NEW bottom
+ *   half) appears at the center and sweeps downward, covering the OLD bottom
+ *   half. The top half stays NEW (fully revealed from phase 1).
  */
 static void draw_split_flap(SDL_Renderer *r, SDL_Texture *tex_old, SDL_Texture *tex_new,
                             SDL_Rect rect, int tile_h, float anim_t, float scale) {
     int half_h = tile_h / 2;
     int mid_y = rect.y + half_h;
     int bot_h = tile_h - half_h;
-    float tex_w_f = (float)rect.w;
 
-    /* Source rects within the texture (texture coords are 0,0 based). */
     SDL_Rect src_top = { 0, 0, rect.w, half_h };
     SDL_Rect src_bot = { 0, half_h, rect.w, bot_h };
-
-    /* 1) Bottom half: old content until phase 2, then new. */
-    SDL_Rect dst_bot = { rect.x, mid_y, rect.w, bot_h };
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-    SDL_RenderCopy(r, (anim_t < 0.5f) ? tex_old : tex_new, &src_bot, &dst_bot);
 
-    /* 2) Top half of new (static, visible once flap passes vertical). */
-    if (anim_t >= 0.5f) {
+    float phase_t;
+    int flap_h;
+
+    if (anim_t < 0.5f) {
+        /* Phase 1: top flap (OLD) compresses toward center, revealing NEW top behind it. */
+        phase_t = 1.f - anim_t * 2.f;
+        flap_h = clampi((int)(phase_t * (float)half_h + 0.5f), 0, half_h);
+
+        /* Bottom half: OLD (static, untouched). */
+        SDL_Rect dst_bot = { rect.x, mid_y, rect.w, bot_h };
+        SDL_RenderCopy(r, tex_old, &src_bot, &dst_bot);
+
+        /* Top half: NEW (static, being revealed behind the falling flap). */
         SDL_Rect dst_top = { rect.x, rect.y, rect.w, half_h };
         SDL_RenderCopy(r, tex_new, &src_top, &dst_top);
-    } else {
-        SDL_Rect dst_top = { rect.x, rect.y, rect.w, half_h };
-        SDL_RenderCopy(r, tex_old, &src_top, &dst_top);
-    }
 
-    /* 3) Animated flap: compresses vertically at the hinge line (mid_y). */
-    float phase_t;
-    SDL_Texture *flap_tex;
-    if (anim_t < 0.5f) {
-        phase_t = 1.f - anim_t * 2.f;
-        flap_tex = tex_old;
+        /* Flap: OLD top half, bottom edge at center, compressing downward. */
+        if (flap_h > 0) {
+            SDL_Rect dst_flap = { rect.x, mid_y - flap_h, rect.w, flap_h };
+            SDL_RenderCopy(r, tex_old, &src_top, &dst_flap);
+        }
+
+        int max_edge = clampi((int)((float)FLIP_TILE_EDGE_MAX_PX * scale), 6,
+                              FLIP_TILE_EDGE_MAX_PX);
+        int thick = flip_edge_thickness_px(flap_h, half_h, max_edge);
+        if (thick > 0) {
+            draw_tile_thickness_edge(r, rect.x, mid_y, rect.w, thick);
+            if (flap_h > 0)
+                draw_tile_thickness_edge(r, rect.x, mid_y - flap_h, rect.w, thick);
+        }
     } else {
+        /* Phase 2: flap back (NEW bottom) sweeps downward from center, covering OLD bottom. */
         phase_t = (anim_t - 0.5f) * 2.f;
-        flap_tex = tex_new;
-        /* Bounce: overshoot slightly, then settle. */
         if (phase_t > 0.7f) {
             float over = (phase_t - 0.7f) / 0.3f;
             phase_t = 1.f + 0.08f * sinf(over * 3.14159f);
         }
-    }
-    int flap_h = clampi((int)(phase_t * (float)half_h + 0.5f), 0, half_h + 4);
-    if (flap_h > 0) {
-        SDL_Rect dst_flap = { rect.x, mid_y - flap_h, rect.w, flap_h };
-        SDL_RenderCopy(r, flap_tex, &src_top, &dst_flap);
+        flap_h = clampi((int)(phase_t * (float)bot_h + 0.5f), 0, bot_h + 4);
+
+        /* Bottom half: OLD (static, behind the landing flap). */
+        SDL_Rect dst_bot = { rect.x, mid_y, rect.w, bot_h };
+        SDL_RenderCopy(r, tex_old, &src_bot, &dst_bot);
+
+        /* Top half: NEW (fully revealed). */
+        SDL_Rect dst_top = { rect.x, rect.y, rect.w, half_h };
+        SDL_RenderCopy(r, tex_new, &src_top, &dst_top);
+
+        /* Flap: NEW bottom half, top edge at center, expanding downward. */
+        if (flap_h > 0) {
+            SDL_Rect dst_flap = { rect.x, mid_y, rect.w, flap_h };
+            SDL_RenderCopy(r, tex_new, &src_bot, &dst_flap);
+        }
+
+        int max_edge = clampi((int)((float)FLIP_TILE_EDGE_MAX_PX * scale), 6,
+                              FLIP_TILE_EDGE_MAX_PX);
+        int thick = flip_edge_thickness_px(flap_h, bot_h, max_edge);
+        if (thick > 0) {
+            draw_tile_thickness_edge(r, rect.x, mid_y, rect.w, thick);
+            if (flap_h > 0)
+                draw_tile_thickness_edge(r, rect.x, mid_y + flap_h, rect.w, thick);
+        }
     }
 
-    /* 4) Drop shadow under the flap while it's mid-rotation. */
+    /* Drop shadow under the flap while mid-rotation. */
     if (flap_h > 0 && flap_h < half_h) {
         int shadow_h = clampi((int)(6.f * scale), 2, 12);
-        int shadow_alpha = (int)(90.f * (1.f - (float)flap_h / (float)half_h));
+        float ratio = (anim_t < 0.5f)
+            ? (1.f - (float)flap_h / (float)half_h)
+            : (1.f - (float)flap_h / (float)bot_h);
+        int shadow_alpha = (int)(90.f * ratio);
         if (shadow_alpha > 0) {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, 0, 0, 0, (Uint8)shadow_alpha);
-            SDL_Rect shadow = { rect.x + 2, mid_y, rect.w - 4, shadow_h };
+            int shadow_y = (anim_t < 0.5f) ? mid_y : (mid_y + flap_h);
+            SDL_Rect shadow = { rect.x + 2, shadow_y, rect.w - 4, shadow_h };
             SDL_RenderFillRect(r, &shadow);
         }
     }
 
-    /* 5) Center divider at the hinge. */
-    (void)tex_w_f;
     draw_center_divider(r, rect, tile_h);
 }
 
