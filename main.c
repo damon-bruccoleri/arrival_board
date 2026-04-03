@@ -16,6 +16,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -347,6 +348,9 @@ int main(int argc, char **argv) {
                   gtfs_health.consecutive_failures);
             last_health_log = now;
         }
+
+        /* Reap zombie child processes (audio fork/exec) to prevent process table exhaustion. */
+        while (waitpid(-1, NULL, WNOHANG) > 0) {}
 
         SDL_GetRendererOutputSize(r, &W, &H);
         static FlipSoundCtx flip_ctx;

@@ -63,26 +63,26 @@ fail:
 void audio_play_flip(const char *flip_path, const char *aplay_device) {
     if (!flip_path || !flip_path[0]) return;
 
+    /* Reap any finished child processes to prevent zombie accumulation. */
+    while (waitpid(-1, NULL, WNOHANG) > 0) {}
+
     int audio_debug = (getenv("AUDIO_DEBUG") != NULL);
     if (audio_debug)
         fprintf(stderr, "AUDIO_DEBUG: audio_play_flip path=%s device=%s\n",
                 flip_path, aplay_device && aplay_device[0] ? aplay_device : "(paplay)");
 
     if (!aplay_device || !aplay_device[0]) {
-        /* Pulse path: play in background, mixes with music. Boost volume with sox when available so it's very audible. */
         pid_t pid = fork();
         if (pid < 0) return;
         if (pid == 0) {
             (void)freopen("/dev/null", "r", stdin);
             (void)freopen("/dev/null", "w", stdout);
             if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
-            /* sox -v 10.0 boosts level; fallback to paplay alone if sox missing */
             execl("/bin/sh", "sh", "-c",
-                  "command -v paplay >/dev/null 2>&1 && ( command -v sox >/dev/null 2>&1 && sox -q -v 10.0 \"$1\" -t wav - 2>/dev/null | paplay 2>/dev/null & ) || ( paplay \"$1\" 2>/dev/null & )",
+                  "command -v paplay >/dev/null 2>&1 && ( command -v sox >/dev/null 2>&1 && sox -q -v 10.0 \"$1\" -t wav - 2>/dev/null | paplay 2>/dev/null ) || paplay \"$1\" 2>/dev/null",
                   "sh", flip_path, (char *)NULL);
             _exit(127);
         }
-        (void)waitpid(pid, NULL, WNOHANG);
         return;
     }
 
