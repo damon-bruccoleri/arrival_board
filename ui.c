@@ -369,8 +369,8 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
     /* dx, dy: reference pixels at LAYOUT_REF_HEIGHT (aligned to background art). */
     static const EyeLayout eyes[] = {
-        { 0.36f, 0.19f,  -90, 300 },
-        { 0.595f, 0.19f, -915, 292 },
+        { 0.36f, 0.19f,  210, 600 },
+        { 0.595f, 0.19f, -615, 592 },
     };
     const int n_eyes = (int)(sizeof(eyes) / sizeof(eyes[0]));
     const int body_h = H - body_y;
