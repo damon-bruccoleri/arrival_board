@@ -16,6 +16,43 @@ static inline int px_scaled(float scale, int ref_px) {
     return (int)roundf((float)ref_px * scale);
 }
 
+/* RGBA render target: clear to transparent, leave target set for further drawing. */
+static void render_target_begin_clear_transparent(SDL_Renderer *r, SDL_Texture *tex) {
+    SDL_SetRenderTarget(r, tex);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
+    SDL_RenderClear(r);
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+}
+
+static void render_target_end(SDL_Renderer *r) {
+    SDL_SetRenderTarget(r, NULL);
+}
+
+static void texture_clear_transparent_only(SDL_Renderer *r, SDL_Texture *tex) {
+    render_target_begin_clear_transparent(r, tex);
+    render_target_end(r);
+}
+
+/* Stretch tile PNG into full w×h target (origin top-left). */
+static void render_target_copy_tile_bg(SDL_Renderer *r, SDL_Texture *bg, int w, int h) {
+    if (!bg) return;
+    SDL_Rect dst = { 0, 0, w, h };
+    SDL_RenderCopy(r, bg, NULL, &dst);
+}
+
+static void render_copy_blended(SDL_Renderer *r, SDL_Texture *tex, const SDL_Rect *dst) {
+    if (!tex || !dst) return;
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_RenderCopy(r, tex, NULL, dst);
+}
+
+/* Solid panel when wide/narrow PNG is unavailable. */
+static void tile_draw_fallback_panel(SDL_Renderer *r, SDL_Rect rect, int radius) {
+    SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
+    fill_round_rect(r, rect, radius);
+}
+
 /* Move text up vs background (ref px at 2160p); right-hand ETA tiles stay center-based. */
 #define REF_TEXT_UP_HEADER 22
 #define REF_TEXT_UP_TILE   26
@@ -105,8 +142,7 @@ static void draw_tile_left_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
     if (wide_tile_tex) {
         /* WideTile is drawn in draw_tile_grid; here we draw only text on transparent. */
     } else {
-        SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
-        fill_round_rect(r, left_rect, radius);
+        tile_draw_fallback_panel(r, left_rect, radius);
     }
     int inner = clampi((int)(32 * scale), 12, 60);
     int tile_up = px_scaled(scale, REF_TEXT_UP_TILE);
@@ -163,10 +199,8 @@ static void draw_tile_right_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
                                    SDL_Color white, SDL_Color dim, int radius,
                                    SDL_Texture *narrow_tile_tex) {
 
-    if (!narrow_tile_tex) {
-        SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
-        fill_round_rect(r, right_rect, radius);
-    }
+    if (!narrow_tile_tex)
+        tile_draw_fallback_panel(r, right_rect, radius);
 
     char minsbuf[16];
     if (a->mins == 0) snprintf(minsbuf, sizeof(minsbuf), "NOW");
@@ -223,38 +257,22 @@ static void render_left_to_texture(SDL_Renderer *r, Fonts *f, SDL_Texture *tex,
                                    int w, int h, const Arrival *a, float scale,
                                    SDL_Color white, SDL_Color dim, int radius,
                                    SDL_Texture *wide_tile_tex) {
-    SDL_SetRenderTarget(r, tex);
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
-    SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
-    SDL_RenderClear(r);
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-    /* Bake background into texture so the flip reveal is opaque (no transparent holes). */
-    if (wide_tile_tex) {
-        SDL_Rect dst = { 0, 0, w, h };
-        SDL_RenderCopy(r, wide_tile_tex, NULL, &dst);
-    }
+    render_target_begin_clear_transparent(r, tex);
+    render_target_copy_tile_bg(r, wide_tile_tex, w, h);
     SDL_Rect rect = { 0, 0, w, h };
     draw_tile_left_content(r, f, a, rect, scale, white, dim, radius, wide_tile_tex);
-    SDL_SetRenderTarget(r, NULL);
+    render_target_end(r);
 }
 
 static void render_right_to_texture(SDL_Renderer *r, Fonts *f, SDL_Texture *tex,
                                     int w, int h, const Arrival *a, float scale,
                                     SDL_Color white, SDL_Color dim, int radius,
                                     SDL_Texture *narrow_tile_tex) {
-    SDL_SetRenderTarget(r, tex);
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
-    SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
-    SDL_RenderClear(r);
-    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-    /* Bake background into texture so the flip reveal is opaque. */
-    if (narrow_tile_tex) {
-        SDL_Rect dst = { 0, 0, w, h };
-        SDL_RenderCopy(r, narrow_tile_tex, NULL, &dst);
-    }
+    render_target_begin_clear_transparent(r, tex);
+    render_target_copy_tile_bg(r, narrow_tile_tex, w, h);
     SDL_Rect rect = { 0, 0, w, h };
     draw_tile_right_content(r, f, a, rect, scale, white, dim, radius, narrow_tile_tex);
-    SDL_SetRenderTarget(r, NULL);
+    render_target_end(r);
 }
 
 static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
@@ -611,10 +629,8 @@ static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const Schedul
     int tile_up = px_scaled(scale, REF_TEXT_UP_TILE);
     int y = rect.y + clampi((int)(20 * scale), 8, 40) + px_scaled(scale, 25) - tile_up;
 
-    if (!wide_tile_tex) {
-        SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
-        fill_round_rect(r, rect, radius);
-    }
+    if (!wide_tile_tex)
+        tile_draw_fallback_panel(r, rect, radius);
 
     const char *route = s->route[0] ? s->route : "--";
     const char *dest  = s->dest[0]  ? s->dest  : "--";
@@ -671,6 +687,12 @@ static void draw_center_divider(SDL_Renderer *r, SDL_Rect rect, int tile_h, floa
     SDL_SetRenderDrawColor(r, 5, 5, 8, 180);
     SDL_Rect div = { rect.x, mid_y - div_h / 2, rect.w, div_h };
     SDL_RenderFillRect(r, &div);
+}
+
+static void render_tile_texture_and_divider(SDL_Renderer *r, SDL_Texture *tex, SDL_Rect dst,
+                                            int tile_h, float scale) {
+    render_copy_blended(r, tex, &dst);
+    draw_center_divider(r, dst, tile_h, scale);
 }
 
 /* Horizontal strip simulating the side of a thick tile (edge-on during flip). */
@@ -861,14 +883,8 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
             SDL_SetTextureBlendMode(slot->left.tex_prev, SDL_BLENDMODE_BLEND);
             SDL_SetTextureBlendMode(slot->right.tex_display, SDL_BLENDMODE_BLEND);
             SDL_SetTextureBlendMode(slot->right.tex_prev, SDL_BLENDMODE_BLEND);
-            for (int j = 0; j < 2; j++) {
-                SDL_Texture *p = j ? slot->right.tex_prev : slot->left.tex_prev;
-                SDL_SetRenderTarget(r, p);
-                SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_NONE);
-                SDL_SetRenderDrawColor(r, 0, 0, 0, 0);
-                SDL_RenderClear(r);
-                SDL_SetRenderTarget(r, NULL);
-            }
+            texture_clear_transparent_only(r, slot->left.tex_prev);
+            texture_clear_transparent_only(r, slot->right.tex_prev);
             slot->valid = 0;
         }
 
@@ -879,14 +895,8 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
         slot->last_arrival = arr[i];
         slot->valid = 1;
 
-        if (wide_tile_tex) {
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, wide_tile_tex, NULL, &left_rect);
-        }
-        if (narrow_tile_tex) {
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, narrow_tile_tex, NULL, &right_rect);
-        }
+        render_copy_blended(r, wide_tile_tex, &left_rect);
+        render_copy_blended(r, narrow_tile_tex, &right_rect);
 
         float stagger = (float)i * FLIP_STAGGER_MS;
 
@@ -898,18 +908,12 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
         } else if (left_chg) {
             flip_part_start(&slot->left, stagger);
             render_left_to_texture(r, f, slot->left.tex_display, left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, slot->left.tex_prev, NULL, &left_rect);
-            draw_center_divider(r, left_rect, tile_h, scale);
+            render_tile_texture_and_divider(r, slot->left.tex_prev, left_rect, tile_h, scale);
         } else if (right_chg) {
             render_left_to_texture(r, f, slot->left.tex_display, left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, slot->left.tex_display, NULL, &left_rect);
-            draw_center_divider(r, left_rect, tile_h, scale);
+            render_tile_texture_and_divider(r, slot->left.tex_display, left_rect, tile_h, scale);
         } else {
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, slot->left.tex_display, NULL, &left_rect);
-            draw_center_divider(r, left_rect, tile_h, scale);
+            render_tile_texture_and_divider(r, slot->left.tex_display, left_rect, tile_h, scale);
         }
 
         /* Right part */
@@ -920,13 +924,9 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
         } else if (right_chg) {
             flip_part_start(&slot->right, stagger);
             render_right_to_texture(r, f, slot->right.tex_display, right_w, tile_h, &arr[i], scale, white, dim, radius, narrow_tile_tex);
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, slot->right.tex_prev, NULL, &right_rect);
-            draw_center_divider(r, right_rect, tile_h, scale);
+            render_tile_texture_and_divider(r, slot->right.tex_prev, right_rect, tile_h, scale);
         } else {
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, slot->right.tex_display, NULL, &right_rect);
-            draw_center_divider(r, right_rect, tile_h, scale);
+            render_tile_texture_and_divider(r, slot->right.tex_display, right_rect, tile_h, scale);
         }
     }
 
@@ -935,10 +935,7 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
         int c = slot_col[slot_idx];
         int rr = slot_row[slot_idx];
         SDL_Rect trc = { pad + c * (tile_w + gap), body_y + rr * (tile_h + gap), tile_w, tile_h };
-        if (wide_tile_tex) {
-            SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-            SDL_RenderCopy(r, wide_tile_tex, NULL, &trc);
-        }
+        render_copy_blended(r, wide_tile_tex, &trc);
         draw_scheduled_tile_content(r, f, &scheduled[i], trc, scale, radius, wide_tile_tex);
         draw_center_divider(r, trc, tile_h, scale);
     }
