@@ -213,29 +213,8 @@ echo "  binary: $PROJECT_DIR/arrival_board"
 # 10. Auto-start on boot (systemd user service)
 # ---------------------------------------------------------------------------
 log "10/11  Installing systemd user service for auto-start"
-
-SERVICE_DIR="$HOME/.config/systemd/user"
-SERVICE_FILE="$SERVICE_DIR/arrival-board.service"
-mkdir -p "$SERVICE_DIR"
-
-cat > "$SERVICE_FILE" <<UNIT
-[Unit]
-Description=Arrival Board kiosk
-After=pipewire-pulse.service
-
-[Service]
-WorkingDirectory=%h/arrival_board
-ExecStart=%h/arrival_board/run_arrival_board.sh
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=default.target
-UNIT
-
-systemctl --user daemon-reload
-systemctl --user enable arrival-board.service
-echo "  arrival-board.service enabled (starts on boot)"
+bash "$SCRIPT_DIR/install_autostart.sh"
+echo "  arrival-board.service installed (starts on boot after reboot)"
 
 # ---------------------------------------------------------------------------
 # 11. Summary

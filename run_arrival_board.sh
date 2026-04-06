@@ -4,11 +4,12 @@ set -u
 # exec >>"$HOME/arrival_board/boot.log" 2>&1
 # set -x
 
-cd "$HOME/arrival_board" || exit 1
+AB_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$AB_ROOT" || exit 1
 # Same env as at boot (SDL_VIDEODRIVER=kmsdrm, etc.) so it runs when started manually
-if [ -f "$HOME/arrival_board/arrival_board.env" ]; then
+if [ -f "$AB_ROOT/arrival_board.env" ]; then
   set -a
-  . "$HOME/arrival_board/arrival_board.env"
+  . "$AB_ROOT/arrival_board.env"
   set +a
 fi
 ulimit -n "${ULIMIT_NOFILE:-16384}" || true
@@ -25,8 +26,8 @@ printf "\033[?25l" || true
 # echo "CFG: STOP_ID=${STOP_ID:-<unset>} ROUTE_FILTER=${ROUTE_FILTER:-} POLL_SECONDS=${POLL_SECONDS:-10}"
 
 # If tools/asoundrc is missing, log to boot.log (no copying; user must install ALSA config if needed).
-BOOTLOG="${BOOT_LOG_PATH:-$HOME/arrival_board/boot.log}"
-if [ ! -f "$HOME/arrival_board/tools/asoundrc" ]; then
+BOOTLOG="${BOOT_LOG_PATH:-$AB_ROOT/boot.log}"
+if [ ! -f "$AB_ROOT/tools/asoundrc" ]; then
   echo "$(date -Iseconds): tools/asoundrc missing" >> "$BOOTLOG"
 fi
 
