@@ -258,10 +258,11 @@ static void render_right_to_texture(SDL_Renderer *r, Fonts *f, SDL_Texture *tex,
 }
 
 static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
-                                      int body_y, int body_h, float scale,
+                                      int body_y, float scale,
                                       SDL_Texture *bg_tex, SDL_Texture *steam_tex) {
+    const int bg_h = H - body_y; /* same vertical span as background RenderCopy dst */
     if (bg_tex) {
-        SDL_Rect dst = { 0, body_y, W, H - body_y };
+        SDL_Rect dst = { 0, body_y, W, bg_h };
         /* ~48%: low enough for UI contrast, high enough to read on dark clear (10,12,16). */
         SDL_SetTextureAlphaMod(bg_tex, 122);
         SDL_RenderCopy(r, bg_tex, NULL, &dst);
@@ -273,16 +274,16 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
     static SteamPuff puffs[STEAM_PUFFS];
     static int init;
     static Uint32 last_ticks;
-    static int last_W, last_body_y, last_body_h;
+    static int last_W, last_body_y, last_bg_h;
 
     /*
-     * Exhaust origins in normalized image space (0–1). Background texture
-     * (Steampunk bus image.png) is stretched to the body rect, so:
-     *   x = nx * W,  y = body_y + ny * body_h
-     * matches the pipes at any resolution. Tune nx/ny to the artwork.
+     * Exhaust origins in normalized image space (0–1). Background is drawn to
+     * { 0, body_y, W, bg_h } with bg_h = H - body_y, so:
+     *   x = nx * W,  y = body_y + ny * bg_h
+     * matches the artwork (must not use tile body_h, which omits bottom pad).
      */
-    const float exhaust_nx[STEAM_PUFFS] = { 0.208f, 0.792f };
-    const float exhaust_ny[STEAM_PUFFS] = { 0.882f, 0.882f };
+    const float exhaust_nx[STEAM_PUFFS] = { 0.44f, 0.80f };
+    const float exhaust_ny[STEAM_PUFFS] = { 0.48f, 0.48f };
     const float rise_speed = 4.4f;
     const float fade_speed = 0.28f;
     const float scale_grow = 0.012f;
@@ -290,13 +291,13 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
     const float start_alpha = 64.f;
     const float drift_right_per_up = 1.0f;
 
-    if (!init || W != last_W || body_y != last_body_y || body_h != last_body_h) {
+    if (!init || W != last_W || body_y != last_body_y || bg_h != last_bg_h) {
         last_W = W;
         last_body_y = body_y;
-        last_body_h = body_h;
+        last_bg_h = bg_h;
         for (int i = 0; i < STEAM_PUFFS; i++) {
             float ex_x = exhaust_nx[i] * (float)W;
-            float ex_y = (float)body_y + exhaust_ny[i] * (float)body_h;
+            float ex_y = (float)body_y + exhaust_ny[i] * (float)bg_h;
             /* Small jitter only (ref-scaled); keeps both stacks on the pipes. */
             float jx = (float)((i * 17) % 21 - 10) * scale;
             float jy = (float)((i * 11) % 12) * scale;
@@ -334,7 +335,7 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
             puffs[i].y < (float)(body_y - px_scaled(scale, 120)) ||
             (i == 1 && puffs[i].x > (float)W)) {
             float ex_x = exhaust_nx[i] * (float)W;
-            float ex_y = (float)body_y + exhaust_ny[i] * (float)body_h;
+            float ex_y = (float)body_y + exhaust_ny[i] * (float)bg_h;
             puffs[i].x = ex_x + (float)((i * 17) % 21 - 10) * scale;
             puffs[i].y = ex_y + (float)((i * 11) % 12) * scale;
             puffs[i].alpha = start_alpha;
@@ -368,8 +369,8 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
     /* dx, dy: reference pixels at LAYOUT_REF_HEIGHT (aligned to background art). */
     static const EyeLayout eyes[] = {
-        { 0.38f, 0.22f,  -49, 366 },
-        { 0.62f, 0.22f, -867, 356 },
+        { 0.36f, 0.19f,  -90, 300 },
+        { 0.595f, 0.19f, -915, 292 },
     };
     const int n_eyes = (int)(sizeof(eyes) / sizeof(eyes[0]));
     const int body_h = H - body_y;
@@ -966,7 +967,7 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
     int body_h = H - body_y - pad;
     if (body_h < 100) body_h = 100;
 
-    draw_background_and_steam(r, W, H, body_y, body_h, scale, bg_tex, steam_tex);
+    draw_background_and_steam(r, W, H, body_y, scale, bg_tex, steam_tex);
     draw_eyes(r, W, H, body_y, scale);
     draw_header(r, f, W, pad, header_h, stop_id, stop_name, wx, symbol_font, emoji_font, scale);
 
