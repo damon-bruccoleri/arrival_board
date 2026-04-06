@@ -178,6 +178,8 @@ int main(int argc, char **argv) {
 #ifdef USE_SDL_IMAGE
     texture_load(r, &res.bg_tex, &res.steam_tex, &res.logo_tex,
                  &res.wide_tile_tex, &res.narrow_tile_tex);
+    if (!res.bg_tex)
+        logf_("Background image not loaded (set BACKGROUND_IMAGE or add Steampunk bus image.png); body area will be solid color only.");
     if (!res.steam_tex) {
         log_to_boot_log("arrival_board: steam_puff.png missing, corrupt, or failed to load; terminating.");
         resources_destroy(&res);

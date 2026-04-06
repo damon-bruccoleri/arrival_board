@@ -262,7 +262,8 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
                                       SDL_Texture *bg_tex, SDL_Texture *steam_tex) {
     if (bg_tex) {
         SDL_Rect dst = { 0, body_y, W, H - body_y };
-        SDL_SetTextureAlphaMod(bg_tex, 76);
+        /* ~48%: low enough for UI contrast, high enough to read on dark clear (10,12,16). */
+        SDL_SetTextureAlphaMod(bg_tex, 122);
         SDL_RenderCopy(r, bg_tex, NULL, &dst);
         SDL_SetTextureAlphaMod(bg_tex, 255);
     }

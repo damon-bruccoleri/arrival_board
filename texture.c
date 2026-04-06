@@ -80,7 +80,8 @@ void texture_load(SDL_Renderer *r,
 
     const char *bg_path = getenv("BACKGROUND_IMAGE");
     if (!bg_path || !*bg_path) bg_path = "Steampunk bus image.png";
-    *bg_tex = load_image(r, bg_path, "Steampunk bus image.png", "Background image", 0);
+    /* force_rgba: some KMS/GL paths mishandle RGB24 from IMG_Load; match tile images. */
+    *bg_tex = load_image(r, bg_path, "Steampunk bus image.png", "Background image", 1);
 
     SDL_Surface *steam_surf = load_surface("steam_puff.png", "steam_puff.png");
     if (!steam_surf) steam_surf = generate_steam_surface();
