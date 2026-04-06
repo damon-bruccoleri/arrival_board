@@ -1,5 +1,5 @@
 # Arrival Board: MTA bus arrivals + weather on full-screen display.
-# Optional: make USE_SDL_IMAGE=1 for background image and logo (requires libsdl2-image-dev).
+# Requires libsdl2-image-dev (PNG backgrounds, tiles, logo, steam art).
 
 CC = cc
 
@@ -8,12 +8,7 @@ SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null || echo -lSDL2)
 
 CFLAGS = -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE $(SDL_CFLAGS)
 LDFLAGS =
-LIBS = $(SDL_LIBS) -lSDL2_ttf -lcjson -lm
-
-ifneq ($(USE_SDL_IMAGE),)
-CFLAGS += -DUSE_SDL_IMAGE
-LIBS += -lSDL2_image
-endif
+LIBS = $(SDL_LIBS) -lSDL2_ttf -lSDL2_image -lcjson -lm
 
 OBJS = main.o audio.o config.o gtfs.o tile.o texture.o ui.o util.o mta.o weather.o
 

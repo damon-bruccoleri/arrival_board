@@ -206,7 +206,7 @@ fi
 log "9/11  Building Arrival Board"
 cd "$PROJECT_DIR"
 make clean
-make USE_SDL_IMAGE=1 -j2
+make -j2
 echo "  binary: $PROJECT_DIR/arrival_board"
 
 # ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ cat <<'EOF'
     - bluetooth + triggerhappy disabled (avahi kept for .local SSH)
     - PipeWire user services enabled with linger
     - arrival_board.env created (if new)
-    - Project built with USE_SDL_IMAGE=1
+    - Project built (make; SDL2_image required)
     - arrival-board.service enabled for auto-start
 
   Next steps:

@@ -27,11 +27,11 @@ Edit `*.c`, `*.h`, `Makefile`, etc. as needed.
 
 ## 3. After changes: compile and run
 
-- **Build** with SDL image support (background/logo PNGs):
+- **Build** (links SDL2_image for PNG assets):
   ```bash
-  cd ~/arrival_board && make USE_SDL_IMAGE=1 -j2
+  cd ~/arrival_board && make clean && make -j2
   ```
-  Use `make clean && …` if a full rebuild is required.
+  Use `make clean` when a full rebuild is required.
 
 - **Run** the new binary (typical kiosk loop):
   ```bash

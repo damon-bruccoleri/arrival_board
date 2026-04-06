@@ -1,6 +1,6 @@
 /*
  * Arrival Board: MTA bus arrivals and weather on a full-screen display.
- * Build with: make [USE_SDL_IMAGE=1]. Config via environment (see arrival_board.env.example).
+ * Build: make (requires libsdl2-image-dev). Config via environment (see arrival_board.env.example).
  */
 #include "audio.h"
 #include "config.h"
@@ -20,9 +20,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#ifdef USE_SDL_IMAGE
 #include <SDL2/SDL_image.h>
-#endif
 
 typedef struct {
     const char *flip_path;
@@ -64,9 +62,7 @@ static void resources_destroy(Resources *res) {
     tile_free_fonts(&res->fonts);
     if (res->renderer)        SDL_DestroyRenderer(res->renderer);
     if (res->win)             SDL_DestroyWindow(res->win);
-#ifdef USE_SDL_IMAGE
     IMG_Quit();
-#endif
     TTF_Quit();
     SDL_Quit();
 }
@@ -146,10 +142,8 @@ int main(int argc, char **argv) {
         SDL_Quit();
         return 1;
     }
-#ifdef USE_SDL_IMAGE
     if ((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) == 0)
         logf_("IMG_Init PNG failed: %s", IMG_GetError());
-#endif
 
     SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
 
@@ -175,7 +169,6 @@ int main(int argc, char **argv) {
     SDL_GetRendererOutputSize(r, &W, &H);
     if (W <= 0 || H <= 0) SDL_GetWindowSize(res.win, &W, &H);
 
-#ifdef USE_SDL_IMAGE
     texture_load(r, &res.bg_tex, &res.steam_tex, &res.logo_tex,
                  &res.wide_tile_tex, &res.narrow_tile_tex);
     if (!res.bg_tex)
@@ -185,7 +178,6 @@ int main(int argc, char **argv) {
         resources_destroy(&res);
         return 1;
     }
-#endif
 
     if (tile_load_fonts(&res.fonts, cfg.font_path,
                         cfg.title_font_path[0] ? cfg.title_font_path : NULL, H) != 0)

@@ -1,6 +1,5 @@
 /*
- * Texture loading for arrival board UI.
- * Requires USE_SDL_IMAGE (libsdl2-image-dev).
+ * Texture loading for arrival board UI (SDL_image / PNG).
  */
 #pragma once
 

@@ -8,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef USE_SDL_IMAGE
 #include <SDL2/SDL_image.h>
 
 static SDL_Surface *load_surface(const char *path, const char *home_rel) {
@@ -91,16 +90,3 @@ void texture_load(SDL_Renderer *r,
     *wide_tile_tex  = load_image(r, "tools/WideTile.png", "tools/WideTile.png", "Wide tile bg", 1);
     *narrow_tile_tex = load_image(r, "tools/NarrowTile.png", "tools/NarrowTile.png", "Narrow tile bg", 1);
 }
-
-#else
-void texture_load(SDL_Renderer *r,
-                  SDL_Texture **bg_tex, SDL_Texture **steam_tex, SDL_Texture **logo_tex,
-                  SDL_Texture **wide_tile_tex, SDL_Texture **narrow_tile_tex) {
-    (void)r;
-    *bg_tex = NULL;
-    *steam_tex = NULL;
-    *logo_tex = NULL;
-    *wide_tile_tex = NULL;
-    *narrow_tile_tex = NULL;
-}
-#endif
