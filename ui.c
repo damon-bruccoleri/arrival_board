@@ -11,8 +11,17 @@
 #include <string.h>
 #include <time.h>
 
+/* Reference-space pixels (as tuned at LAYOUT_REF_HEIGHT); scaled by layout_scale(H). */
+static inline int px_scaled(float scale, int ref_px) {
+    return (int)roundf((float)ref_px * scale);
+}
+
+/* Move text up vs background (ref px at 2160p); right-hand ETA tiles stay center-based. */
+#define REF_TEXT_UP_HEADER 22
+#define REF_TEXT_UP_TILE   26
+
 #define STEAM_PUFFS  2
-#define STEAM_SPHERE_OFFSET 60
+#define STEAM_SPHERE_OFFSET 60 /* ref px at 2160p height */
 #define EYE_RADIUS_SCALE  18
 #define EYE_PULSE_HZ      (2.2f * 2.0f / 15.0f)
 #define EYE_ALPHA_LO      140
@@ -83,7 +92,7 @@ static void tile_split_rects(SDL_Rect full, float scale, Fonts *f,
     int right_w = (eta_w > min_w ? eta_w : min_w) + 2 * inner;
     if (right_w < (int)(full.w * 0.15f)) right_w = (int)(full.w * 0.15f);
     int left_w = full.w - right_w - gap;
-    if (left_w < 80) { left_w = full.w - right_w; gap = 0; }
+    if (left_w < px_scaled(scale, 80)) { left_w = full.w - right_w; gap = 0; }
     *left_out  = (SDL_Rect){ full.x, full.y, left_w, full.h };
     *right_out = (SDL_Rect){ full.x + left_w + gap, full.y, right_w, full.h };
 }
@@ -100,7 +109,8 @@ static void draw_tile_left_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
         fill_round_rect(r, left_rect, radius);
     }
     int inner = clampi((int)(32 * scale), 12, 60);
-    int y = left_rect.y + clampi((int)(20 * scale), 8, 40) + 23;
+    int tile_up = px_scaled(scale, REF_TEXT_UP_TILE);
+    int y = left_rect.y + clampi((int)(20 * scale), 8, 40) + px_scaled(scale, 23) - tile_up;
     int y2 = y + clampi((int)(120 * scale), 70, 190);
     int line1_gap = clampi((int)(10 * scale), 6, 20);
     int left_w = left_rect.w;
@@ -129,13 +139,13 @@ static void draw_tile_left_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
     int route_w = 0;
     text_size(route_font, route, &route_w, NULL);
     int max_dest_w = left_w - 2 * inner - route_w - line1_gap;
-    if (max_dest_w < 40) max_dest_w = 40;
+    if (max_dest_w < px_scaled(scale, 40)) max_dest_w = px_scaled(scale, 40);
 
-    int left_x = left_rect.x + inner + 90;
+    int left_x = left_rect.x + inner + px_scaled(scale, 90);
     draw_text(r, route_font, route, left_x, y, route_color, 0);
     char dest_line[256];
     snprintf(dest_line, sizeof(dest_line), " - %s", dest);
-    draw_text_trunc(r, f->tile_small, dest_line, left_x + route_w + line1_gap, y + 45, max_dest_w, dim, 0);
+    draw_text_trunc(r, f->tile_small, dest_line, left_x + route_w + line1_gap, y + px_scaled(scale, 45), max_dest_w, dim, 0);
 
     char stopsbuf[32], milesbuf[32];
     if (a->stops_away >= 0) snprintf(stopsbuf, sizeof(stopsbuf), "%d", a->stops_away);
@@ -192,7 +202,7 @@ static void draw_tile_right_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
         int block_h = h1 + line_gap + h2;
         int top_y = center_y - block_h / 2;
         draw_text(r, mins_font, minsbuf, center_x, top_y, eta_color, 1);
-        draw_text(r, f->tile_small, "min", center_x, top_y + h1 + line_gap - 20, dim, 1);
+        draw_text(r, f->tile_small, "min", center_x, top_y + h1 + line_gap - px_scaled(scale, 20), dim, 1);
     }
 }
 
@@ -248,7 +258,7 @@ static void render_right_to_texture(SDL_Renderer *r, Fonts *f, SDL_Texture *tex,
 }
 
 static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
-                                      int body_y, int body_h,
+                                      int body_y, int body_h, float scale,
                                       SDL_Texture *bg_tex, SDL_Texture *steam_tex) {
     if (bg_tex) {
         SDL_Rect dst = { 0, body_y, W, H - body_y };
@@ -262,24 +272,35 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
     static SteamPuff puffs[STEAM_PUFFS];
     static int init;
     static Uint32 last_ticks;
+    static int last_W, last_body_y, last_body_h;
 
-    const float exhaust_img_x[STEAM_PUFFS] = { 0.22f, 0.78f };
-    const float exhaust_img_y[STEAM_PUFFS] = { 0.88f, 0.88f };
+    /*
+     * Exhaust origins in normalized image space (0–1). Background texture
+     * (Steampunk bus image.png) is stretched to the body rect, so:
+     *   x = nx * W,  y = body_y + ny * body_h
+     * matches the pipes at any resolution. Tune nx/ny to the artwork.
+     */
+    const float exhaust_nx[STEAM_PUFFS] = { 0.208f, 0.792f };
+    const float exhaust_ny[STEAM_PUFFS] = { 0.882f, 0.882f };
     const float rise_speed = 4.4f;
     const float fade_speed = 0.28f;
     const float scale_grow = 0.012f;
     const float puff_size_mult = 2.f;
     const float start_alpha = 64.f;
-    const float origin_dx[STEAM_PUFFS] = { -85.f, 280.f };   /* -10px x each */
-    const float origin_dy[STEAM_PUFFS] = { -490.f, -670.f }; /* -10px y each */
     const float drift_right_per_up = 1.0f;
 
-    if (!init) {
+    if (!init || W != last_W || body_y != last_body_y || body_h != last_body_h) {
+        last_W = W;
+        last_body_y = body_y;
+        last_body_h = body_h;
         for (int i = 0; i < STEAM_PUFFS; i++) {
-            float ex_x = (float)W * exhaust_img_x[i] + origin_dx[i];
-            float ex_y = (float)body_y + (float)body_h * exhaust_img_y[i] + origin_dy[i];
-            puffs[i].x = ex_x + (float)((i * 17) % 21 - 10);
-            puffs[i].y = ex_y + (float)((i * 11) % 12);
+            float ex_x = exhaust_nx[i] * (float)W;
+            float ex_y = (float)body_y + exhaust_ny[i] * (float)body_h;
+            /* Small jitter only (ref-scaled); keeps both stacks on the pipes. */
+            float jx = (float)((i * 17) % 21 - 10) * scale;
+            float jy = (float)((i * 11) % 12) * scale;
+            puffs[i].x = ex_x + jx;
+            puffs[i].y = ex_y + jy;
             puffs[i].alpha = start_alpha;
             puffs[i].scale = 0.35f + (float)(i % 3) * 0.05f;
             puffs[i].rise = rise_speed + (float)(i % 2) * 1.2f;
@@ -309,12 +330,12 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 
         /* Respawn when faded out, too high, or (for right puff) when its center moves off-screen. */
         if (puffs[i].alpha <= 0.f ||
-            puffs[i].y < (float)(body_y - 120) ||
+            puffs[i].y < (float)(body_y - px_scaled(scale, 120)) ||
             (i == 1 && puffs[i].x > (float)W)) {
-            float ex_x = (float)W * exhaust_img_x[i] + origin_dx[i];
-            float ex_y = (float)body_y + (float)body_h * exhaust_img_y[i] + origin_dy[i];
-            puffs[i].x = ex_x + (float)((i * 17) % 21 - 10);
-            puffs[i].y = ex_y + (float)((i * 11) % 12);
+            float ex_x = exhaust_nx[i] * (float)W;
+            float ex_y = (float)body_y + exhaust_ny[i] * (float)body_h;
+            puffs[i].x = ex_x + (float)((i * 17) % 21 - 10) * scale;
+            puffs[i].y = ex_y + (float)((i * 11) % 12) * scale;
             puffs[i].alpha = start_alpha;
             puffs[i].scale = 0.30f + (float)(i % 3) * 0.05f;
             puffs[i].rise = rise_speed + (float)(i % 2) * 1.0f;
@@ -331,9 +352,10 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
                 (int)puffs[i].y - sz / 2,
                 sz, sz
             };
+            int steam_off = px_scaled(scale, STEAM_SPHERE_OFFSET);
             SDL_Rect dst2 = {
-                dst1.x + STEAM_SPHERE_OFFSET,
-                dst1.y + STEAM_SPHERE_OFFSET,
+                dst1.x + steam_off,
+                dst1.y + steam_off,
                 sz, sz
             };
             SDL_RenderCopy(r, steam_tex, NULL, &dst1);
@@ -343,9 +365,10 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 }
 
 static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
+    /* dx, dy: reference pixels at LAYOUT_REF_HEIGHT (aligned to background art). */
     static const EyeLayout eyes[] = {
         { 0.38f, 0.22f,  -49, 366 },
-        { 0.62f, 0.22f, -867, 356 },   /* -3px x */
+        { 0.62f, 0.22f, -867, 356 },
     };
     const int n_eyes = (int)(sizeof(eyes) / sizeof(eyes[0]));
     const int body_h = H - body_y;
@@ -359,8 +382,8 @@ static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
 
     for (int i = 0; i < n_eyes; i++) {
         const EyeLayout *e = &eyes[i];
-        int cx = (int)((float)W * e->fx + 0.5f) + e->dx;
-        int cy = (int)(body_y + (float)body_h * e->fy + 0.5f) + e->dy;
+        int cx = (int)((float)W * e->fx + 0.5f) + px_scaled(scale, e->dx);
+        int cy = (int)(body_y + (float)body_h * e->fy + 0.5f) + px_scaled(scale, e->dy);
         draw_filled_circle(r, cx, cy, radius, cyan);
     }
 }
@@ -376,7 +399,8 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     SDL_SetRenderDrawColor(r, 22, 26, 34, 255);
     fill_round_rect(r, hdr, clampi((int)(24 * scale), 10, 40));
 
-    int title_y = hdr.y + clampi((int)(22 * scale), 10, 36);
+    int hdr_up = px_scaled(scale, REF_TEXT_UP_HEADER);
+    int title_y = hdr.y + clampi((int)(22 * scale), 10, 36) - hdr_up;
     TTF_Font *title_font = (f->title_font) ? f->title_font : f->h1;
     draw_text(r, title_font, "Arrival Board", hdr.x + hdr.w / 2, title_y, white, 1);
 
@@ -385,7 +409,7 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     else snprintf(left1, sizeof(left1), "Stop %s", stop_id ? stop_id : "--");
 
     int left_x = hdr.x + pad;
-    int top_y  = hdr.y + clampi((int)(52 * scale), 28, 80);
+    int top_y  = hdr.y + clampi((int)(52 * scale), 28, 80) - hdr_up;
     draw_text_trunc(r, f->h2, left1, left_x, top_y, hdr.w - 2 * pad - (int)(560 * scale), white, 0);
 
     char left2[256];
@@ -401,7 +425,7 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     int ts_w = 0, ts_h = 0;
     text_size(f->h2, ts, &ts_w, &ts_h);
     int time_moon_gap = clampi((int)(10 * scale), 6, 20);
-    int first_line_y = hdr.y + pad;
+    int first_line_y = hdr.y + pad - hdr_up;
 
     /* Moon phase glyphs (Noto Color Emoji): U+1F311..U+1F318, UTF-8. */
     static const char moon_phase_utf8[8][5] = {
@@ -421,14 +445,19 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     if (moon_utf8 && moon_w > 0) {
         int time_right_x = right_x - moon_w - time_moon_gap;
         draw_text(r, f->h2, ts, time_right_x, first_line_y, white, 2);
-        draw_text_scaled(r, emoji_font, moon_utf8, right_x, first_line_y + 20, white, 2, 0.5f);
+        draw_text_scaled(r, emoji_font, moon_utf8, right_x, first_line_y + px_scaled(scale, 20), white, 2, 0.5f);
     } else {
         draw_text(r, f->h2, ts, right_x, first_line_y, white, 2);
     }
 
+    /* Second line: keep icon/temp/precip left of the moon column so it does not stack on the moon. */
+    int moon_reserve = 0;
+    if (moon_w > 0)
+        moon_reserve = moon_w + time_moon_gap + px_scaled(scale, 16);
+    int weather_right_x = right_x - moon_reserve;
+
     int right_line_gap = clampi((int)(12 * scale), 6, 24);
-    /* Weather line: icon + temp + precip, moved up 10px from default. */
-    const int weather_line_offset = -20;
+    int weather_line_offset = -px_scaled(scale, 20);
 
     if (wx && wx->have) {
         TTF_Font *w_icon_font = emoji_font;
@@ -446,14 +475,15 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
         text_size(w_icon_font, wx->icon, &icon_w, NULL);
         icon_w = (int)(icon_w * 0.5f + 0.5f);
         int gap_icon = clampi((int)(8 * scale), 4, 16);
-        int y = hdr.y + pad + ts_h + right_line_gap + weather_line_offset;
+        int y = hdr.y + pad + ts_h + right_line_gap + weather_line_offset - hdr_up;
 
-        int text_left = right_x - info_w;
+        int text_left = weather_right_x - info_w;
         int icon_x = text_left - gap_icon - icon_w;
-        draw_text_scaled(r, w_icon_font, wx->icon, icon_x, y + 20, white, 0, 0.5f);
-        draw_text(r, f->h2, info, right_x, y, white, 2);
+        draw_text_scaled(r, w_icon_font, wx->icon, icon_x, y + px_scaled(scale, 20), white, 0, 0.5f);
+        draw_text(r, f->h2, info, weather_right_x, y, white, 2);
     } else {
-        draw_text(r, f->h2, "Weather --", right_x, hdr.y + pad + ts_h + right_line_gap + weather_line_offset, dim, 2);
+        draw_text(r, f->h2, "Weather --", weather_right_x,
+                  hdr.y + pad + ts_h + right_line_gap + weather_line_offset - hdr_up, dim, 2);
     }
 }
 
@@ -575,8 +605,9 @@ static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const Schedul
                                         SDL_Texture *wide_tile_tex) {
     SDL_Color dim   = { 210, 210, 210, 255 };
     int inner = clampi((int)(32 * scale), 12, 60);
-    int x = rect.x + inner + 200;
-    int y = rect.y + clampi((int)(20 * scale), 8, 40) + 25;
+    int x = rect.x + inner + px_scaled(scale, 200);
+    int tile_up = px_scaled(scale, REF_TEXT_UP_TILE);
+    int y = rect.y + clampi((int)(20 * scale), 8, 40) + px_scaled(scale, 25) - tile_up;
 
     if (!wide_tile_tex) {
         SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
@@ -590,12 +621,12 @@ static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const Schedul
     text_size(f->tile_big, route, &route_w, NULL);
     int line1_gap = clampi((int)(10 * scale), 6, 20);
     int max_dest_w = rect.w - 2 * inner - route_w - line1_gap * 2;
-    if (max_dest_w < 40) max_dest_w = 40;
+    if (max_dest_w < px_scaled(scale, 40)) max_dest_w = px_scaled(scale, 40);
 
     draw_text(r, f->tile_big, route, x, y, route_color, 0);
     char dest_line[256];
     snprintf(dest_line, sizeof(dest_line), " - %s", dest);
-    draw_text_trunc(r, f->tile_small, dest_line, x + route_w + line1_gap, y + 45, max_dest_w, dim, 0);
+    draw_text_trunc(r, f->tile_small, dest_line, x + route_w + line1_gap, y + px_scaled(scale, 45), max_dest_w, dim, 0);
 
     char line2[128];
     format_scheduled_time(s->when, line2, sizeof(line2));
@@ -631,11 +662,12 @@ static void flip_part_destroy(FlipPart *fp) {
     fp->delay_ms = 0.f;
 }
 
-static void draw_center_divider(SDL_Renderer *r, SDL_Rect rect, int tile_h) {
+static void draw_center_divider(SDL_Renderer *r, SDL_Rect rect, int tile_h, float scale) {
+    int div_h = clampi(px_scaled(scale, DIVIDER_H), 1, 8);
     int mid_y = rect.y + tile_h / 2;
     SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(r, 5, 5, 8, 180);
-    SDL_Rect div = { rect.x, mid_y - DIVIDER_H / 2, rect.w, DIVIDER_H };
+    SDL_Rect div = { rect.x, mid_y - div_h / 2, rect.w, div_h };
     SDL_RenderFillRect(r, &div);
 }
 
@@ -754,12 +786,15 @@ static void draw_split_flap(SDL_Renderer *r, SDL_Texture *tex_old, SDL_Texture *
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_SetRenderDrawColor(r, 0, 0, 0, (Uint8)shadow_alpha);
             int shadow_y = (anim_t < 0.5f) ? mid_y : (mid_y + flap_h);
-            SDL_Rect shadow = { rect.x + 2, shadow_y, rect.w - 4, shadow_h };
+            int sm = px_scaled(scale, 2);
+            int sm2 = px_scaled(scale, 4);
+            if (sm < 1) sm = 1;
+            SDL_Rect shadow = { rect.x + sm, shadow_y, rect.w - sm2, shadow_h };
             SDL_RenderFillRect(r, &shadow);
         }
     }
 
-    draw_center_divider(r, rect, tile_h);
+    draw_center_divider(r, rect, tile_h, scale);
 }
 
 static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int body_h,
@@ -863,16 +898,16 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
             render_left_to_texture(r, f, slot->left.tex_display, left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->left.tex_prev, NULL, &left_rect);
-            draw_center_divider(r, left_rect, tile_h);
+            draw_center_divider(r, left_rect, tile_h, scale);
         } else if (right_chg) {
             render_left_to_texture(r, f, slot->left.tex_display, left_w, tile_h, &arr[i], scale, white, dim, radius, wide_tile_tex);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->left.tex_display, NULL, &left_rect);
-            draw_center_divider(r, left_rect, tile_h);
+            draw_center_divider(r, left_rect, tile_h, scale);
         } else {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->left.tex_display, NULL, &left_rect);
-            draw_center_divider(r, left_rect, tile_h);
+            draw_center_divider(r, left_rect, tile_h, scale);
         }
 
         /* Right part */
@@ -885,11 +920,11 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
             render_right_to_texture(r, f, slot->right.tex_display, right_w, tile_h, &arr[i], scale, white, dim, radius, narrow_tile_tex);
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->right.tex_prev, NULL, &right_rect);
-            draw_center_divider(r, right_rect, tile_h);
+            draw_center_divider(r, right_rect, tile_h, scale);
         } else {
             SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
             SDL_RenderCopy(r, slot->right.tex_display, NULL, &right_rect);
-            draw_center_divider(r, right_rect, tile_h);
+            draw_center_divider(r, right_rect, tile_h, scale);
         }
     }
 
@@ -903,7 +938,7 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
             SDL_RenderCopy(r, wide_tile_tex, NULL, &trc);
         }
         draw_scheduled_tile_content(r, f, &scheduled[i], trc, scale, radius, wide_tile_tex);
-        draw_center_divider(r, trc, tile_h);
+        draw_center_divider(r, trc, tile_h, scale);
     }
 
     if (flip_ended_this_frame && on_flip_ended)
@@ -930,7 +965,7 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
     int body_h = H - body_y - pad;
     if (body_h < 100) body_h = 100;
 
-    draw_background_and_steam(r, W, H, body_y, body_h, bg_tex, steam_tex);
+    draw_background_and_steam(r, W, H, body_y, body_h, scale, bg_tex, steam_tex);
     draw_eyes(r, W, H, body_y, scale);
     draw_header(r, f, W, pad, header_h, stop_id, stop_name, wx, symbol_font, emoji_font, scale);
 

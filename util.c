@@ -102,6 +102,7 @@ static char *http_get_one(const char *url) {
     if (!fp) return NULL;
 
     size_t cap = 64 * 1024;
+    const size_t max_cap = 4 * 1024 * 1024;
     size_t len = 0;
     char *buf = (char *)malloc(cap);
     if (!buf) { pclose(fp); return NULL; }
@@ -109,7 +110,12 @@ static char *http_get_one(const char *url) {
     int ch;
     while ((ch = fgetc(fp)) != EOF) {
         if (len + 2 > cap) {
+            if (cap >= max_cap) {
+                logf_("HTTP_GET_FAIL response exceeds %zu bytes, aborting", max_cap);
+                free(buf); pclose(fp); return NULL;
+            }
             cap *= 2;
+            if (cap > max_cap) cap = max_cap;
             char *nb = (char *)realloc(buf, cap);
             if (!nb) { free(buf); pclose(fp); return NULL; }
             buf = nb;

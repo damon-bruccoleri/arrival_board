@@ -192,10 +192,8 @@ int main(int argc, char **argv) {
 
     float sym_scale = layout_scale(H);
     int sym_pt = clampi((int)(58.f * sym_scale), 26, 120);
-    res.symbol_font = TTF_OpenFont(cfg.symbol_font_path, sym_pt);
-    if (!res.symbol_font)
-        return fatal_font_error(&res, "symbol font failed to load",
-                                cfg.symbol_font_path, "SYMBOL_FONT_PATH", "fonts-noto-core");
+    /* symbol_font not currently used by any render path; skip loading to save RAM */
+    res.symbol_font = NULL;
 
     int emoji_pt = clampi(sym_pt / 2, 12, 120);
     res.emoji_font = TTF_OpenFont(cfg.emoji_font_path, emoji_pt);

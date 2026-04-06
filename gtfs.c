@@ -20,7 +20,7 @@ enum {
 };
 
 #define MAX_ROUTES   512
-#define MAX_TRIPS    120000
+#define MAX_TRIPS    4000
 #define MAX_STOPTIMES_AT_STOP 8000
 #define MAX_STOPS    16000
 #define MAX_CALENDAR 128
@@ -141,19 +141,6 @@ static int routes_fn(char *line, void *ctx) {
     GtfsRoute *r = &feed.routes[feed.n_routes++];
     snprintf(r->route_id, sizeof(r->route_id), "%s", f[0]);
     snprintf(r->short_name, sizeof(r->short_name), "%s", n >= 3 ? f[2] : f[0]);
-    return 0;
-}
-
-static int trips_fn(char *line, void *ctx) {
-    (void)ctx;
-    char *f[32];
-    int n = parse_csv_line(line, f, 32);
-    if (n < 3 || feed.n_trips >= MAX_TRIPS) return (n < 3) ? 0 : -1;
-    GtfsTrip *t = &feed.trips[feed.n_trips++];
-    snprintf(t->trip_id, sizeof(t->trip_id), "%s", f[2]);
-    snprintf(t->route_id, sizeof(t->route_id), "%s", f[0]);
-    snprintf(t->service_id, sizeof(t->service_id), "%s", f[1]);
-    snprintf(t->headsign, sizeof(t->headsign), "%s", n >= 4 ? f[3] : "");
     return 0;
 }
 
@@ -348,11 +335,30 @@ static time_t ymd_mins_to_time(int date_ymd, int mins) {
     return mktime(&tm);
 }
 
+/* Only keep trips whose trip_id appears in the already-parsed stop_times. */
+static int trips_filtered_fn(char *line, void *ctx) {
+    (void)ctx;
+    char *f[32];
+    int n = parse_csv_line(line, f, 32);
+    if (n < 3) return 0;
+    int found = 0;
+    for (int i = 0; i < feed.n_stop_times; i++)
+        if (strcmp(feed.stop_times[i].trip_id, f[2]) == 0) { found = 1; break; }
+    if (!found) return 0;
+    if (feed.n_trips >= MAX_TRIPS) return -1;
+    GtfsTrip *t = &feed.trips[feed.n_trips++];
+    snprintf(t->trip_id, sizeof(t->trip_id), "%s", f[2]);
+    snprintf(t->route_id, sizeof(t->route_id), "%s", f[0]);
+    snprintf(t->service_id, sizeof(t->service_id), "%s", f[1]);
+    snprintf(t->headsign, sizeof(t->headsign), "%s", n >= 4 ? f[3] : "");
+    return 0;
+}
+
 static void gtfs_parse_zip(const char *zip_path) {
     feed.n_routes = feed.n_trips = feed.n_stop_times = 0;
     feed.n_stops = feed.n_calendars = feed.n_cal_dates = 0;
     read_zip_file(zip_path, "routes.txt", routes_fn, NULL);
-    read_zip_file(zip_path, "trips.txt", trips_fn, NULL);
+    /* trips.txt is loaded lazily in gtfs_next_departures, filtered by stop */
     read_zip_file(zip_path, "stops.txt", stops_fn, NULL);
     read_zip_file(zip_path, "calendar.txt", calendar_fn, NULL);
     read_zip_file(zip_path, "calendar_dates.txt", calendar_dates_fn, NULL);
@@ -443,17 +449,22 @@ int gtfs_next_departures(const char *stop_id, const char *realtime_routes,
     if (!feed.loaded || !out || max_out <= 0 || !stop_id || !*stop_id) return 0;
 
     if (!resolve_stop(stop_id)) return 0;
+    const char *zip = feed.cache_path[0] ? feed.cache_path : "/tmp/gtfs_bus_cache.zip";
+
     feed.n_stop_times = 0;
-    read_zip_file(feed.cache_path[0] ? feed.cache_path : "/tmp/gtfs_bus_cache.zip",
-                  "stop_times.txt", stop_times_fn, NULL);
+    read_zip_file(zip, "stop_times.txt", stop_times_fn, NULL);
     logf_("GTFS: stop_times at stop (%d ids): %d", n_stop_filter_ids, feed.n_stop_times);
+
+    feed.n_trips = 0;
+    read_zip_file(zip, "trips.txt", trips_filtered_fn, NULL);
+    logf_("GTFS: trips matching stop: %d", feed.n_trips);
 
     int now_ymd, now_mins;
     now_ny(&now_ymd, &now_mins);
 
     typedef struct { char route_id[64]; time_t when; char headsign[128]; } Cand;
-    Cand best[MAX_ROUTES];
-    int route_seen[MAX_ROUTES];
+    static Cand best[MAX_ROUTES];
+    static int route_seen[MAX_ROUTES];
     for (int i = 0; i < MAX_ROUTES; i++) {
         route_seen[i] = 0;
         best[i].when = (time_t)-1;
@@ -526,7 +537,7 @@ int gtfs_next_departures(const char *stop_id, const char *realtime_routes,
         if (strcmp(short_name, "Q27") == 0) { q27_filtered++; continue; }
         if (!is_express_route(best[ri].route_id)) { non_express_filtered++; continue; }
         out[n_out].when = best[ri].when;
-        snprintf(out[n_out].route, sizeof(out[n_out].route), "%s", short_name);
+        snprintf(out[n_out].route, sizeof(out[n_out].route), "%.31s", short_name);
         snprintf(out[n_out].dest, sizeof(out[n_out].dest), "%s", best[ri].headsign);
         n_out++;
     }

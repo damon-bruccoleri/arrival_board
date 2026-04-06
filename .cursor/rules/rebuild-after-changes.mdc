@@ -1,20 +1,48 @@
 ---
-description: Always rebuild and restart the app after code changes (Pi runs binary from disk)
+description: Stop Arrival Board before edits; rebuild and run after code changes
 alwaysApply: true
 ---
 
-# Rebuild and Restart After Code Changes
+# Arrival Board: stop → edit → build → run
 
-After editing any source file (e.g. `*.c`, `*.h`, Makefile) in this project:
+When working on this project (`arrival_board` C app on Raspberry Pi):
 
-1. **Run a full rebuild.** If the build succeeds, **stop any running instance and start the new binary**:
-   ```bash
-   cd /home/damon/arrival_board && make clean && make -j USE_SDL_IMAGE=1 && make stop && ./arrival_board &
-   ```
-   - `make clean && make -j USE_SDL_IMAGE=1`: full rebuild.
-   - If build fails, the command stops and the old process is left running.
-   - If build succeeds: `make stop` kills any running arrival_board/run script, then `./arrival_board &` runs the new binary in the background.
+## 1. Before changing any code
 
-2. Reboot does **not** recompile; only `make` does. The running process must be stopped (e.g. `make stop`) before the new binary can use the display.
+**Stop existing Arrival Board processes first** so the display/audio are not held by an old binary and file replacement is safe:
 
-If you make changes but don't rebuild and restart, the running `arrival_board` binary is unchanged and the user will not see your fixes.
+```bash
+cd ~/arrival_board || cd "$HOME/arrival_board"
+make stop 2>/dev/null || true
+pkill -f 'run_arrival_board' 2>/dev/null || true
+pkill -f '/arrival_board/arrival_board' 2>/dev/null || true
+pkill -f 'paplay.*/arrival_board/tools' 2>/dev/null || true
+```
+
+(Adjust `pkill` patterns if your install path differs.)
+
+## 2. Make your edits
+
+Edit `*.c`, `*.h`, `Makefile`, etc. as needed.
+
+## 3. After changes: compile and run
+
+- **Build** with SDL image support (background/logo PNGs):
+  ```bash
+  cd ~/arrival_board && make USE_SDL_IMAGE=1 -j2
+  ```
+  Use `make clean && …` if a full rebuild is required.
+
+- **Run** the new binary (typical kiosk loop):
+  ```bash
+  cd ~/arrival_board && ./run_arrival_board.sh &
+  ```
+  Or `nohup ./run_arrival_board.sh >> manual_run.log 2>&1 &` when no TTY.
+
+If the build **fails**, do not leave a half-started app; fix compile errors first.
+
+## Notes
+
+- Reboot does **not** recompile; only `make` updates the binary on disk.
+- If you skip **stop before edit**, the user may still be running an old process and not see fixes.
+- If you skip **build + run** after edit, changes are not visible until someone rebuilds and restarts manually.
