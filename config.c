@@ -73,7 +73,7 @@ void config_from_env(AppConfig *cfg) {
     env_str(cfg->aplay_device, sizeof(cfg->aplay_device), "APLAY_DEVICE", NULL);
 
     cfg->poll_seconds = env_int("POLL_SECONDS", 10, 5, 3600);
-    cfg->max_tiles = env_int("MAX_TILES", 12, 1, 24);
+    cfg->max_tiles = env_int("MAX_TILES", TILE_SLOTS_MAX, 1, TILE_SLOTS_MAX);
 
     env_str(cfg->gtfs_url, sizeof(cfg->gtfs_url), "GTFS_BUS_URL",
             "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_busco.zip");

@@ -38,7 +38,7 @@ typedef struct ScheduledDeparture {
     time_t when;        /* America/New_York */
 } ScheduledDeparture;
 
-#define SCHEDULED_MAX 24
+#define SCHEDULED_MAX 12
 
 /* Grid layout: fixed columns and rows; only this many tiles are drawn. */
 #define TILE_COLS_FIXED  2

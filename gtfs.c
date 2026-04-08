@@ -77,6 +77,8 @@ typedef struct {
     int               n_cal_dates;
     char              cache_path[512];
     int               loaded;
+    int               stop_times_cached;
+    char              cached_stop_id[64];
 } GtfsFeed;
 
 static GtfsFeed feed;
@@ -357,6 +359,8 @@ static int trips_filtered_fn(char *line, void *ctx) {
 static void gtfs_parse_zip(const char *zip_path) {
     feed.n_routes = feed.n_trips = feed.n_stop_times = 0;
     feed.n_stops = feed.n_calendars = feed.n_cal_dates = 0;
+    feed.stop_times_cached = 0;
+    feed.cached_stop_id[0] = '\0';
     read_zip_file(zip_path, "routes.txt", routes_fn, NULL);
     /* trips.txt is loaded lazily in gtfs_next_departures, filtered by stop */
     read_zip_file(zip_path, "stops.txt", stops_fn, NULL);
@@ -448,16 +452,21 @@ int gtfs_next_departures(const char *stop_id, const char *realtime_routes,
                          ScheduledDeparture *out, int max_out) {
     if (!feed.loaded || !out || max_out <= 0 || !stop_id || !*stop_id) return 0;
 
-    if (!resolve_stop(stop_id)) return 0;
-    const char *zip = feed.cache_path[0] ? feed.cache_path : "/tmp/gtfs_bus_cache.zip";
+    if (!feed.stop_times_cached || strcmp(stop_id, feed.cached_stop_id) != 0) {
+        if (!resolve_stop(stop_id)) return 0;
+        const char *zip = feed.cache_path[0] ? feed.cache_path : "/tmp/gtfs_bus_cache.zip";
 
-    feed.n_stop_times = 0;
-    read_zip_file(zip, "stop_times.txt", stop_times_fn, NULL);
-    logf_("GTFS: stop_times at stop (%d ids): %d", n_stop_filter_ids, feed.n_stop_times);
+        feed.n_stop_times = 0;
+        read_zip_file(zip, "stop_times.txt", stop_times_fn, NULL);
+        logf_("GTFS: stop_times at stop (%d ids): %d", n_stop_filter_ids, feed.n_stop_times);
 
-    feed.n_trips = 0;
-    read_zip_file(zip, "trips.txt", trips_filtered_fn, NULL);
-    logf_("GTFS: trips matching stop: %d", feed.n_trips);
+        feed.n_trips = 0;
+        read_zip_file(zip, "trips.txt", trips_filtered_fn, NULL);
+        logf_("GTFS: trips matching stop: %d", feed.n_trips);
+
+        feed.stop_times_cached = 1;
+        snprintf(feed.cached_stop_id, sizeof(feed.cached_stop_id), "%s", stop_id);
+    }
 
     int now_ymd, now_mins;
     now_ny(&now_ymd, &now_mins);

@@ -8,7 +8,7 @@ SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null || echo -lSDL2)
 
 CFLAGS = -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE $(SDL_CFLAGS)
 LDFLAGS =
-LIBS = $(SDL_LIBS) -lSDL2_ttf -lSDL2_image -lcjson -lm
+LIBS = $(SDL_LIBS) -lSDL2_ttf -lSDL2_image -lcjson -lm -pthread
 
 OBJS = main.o audio.o config.o gtfs.o tile.o texture.o ui.o util.o mta.o weather.o
 

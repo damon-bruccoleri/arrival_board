@@ -94,9 +94,8 @@ void urlencode(char *out, size_t outsz, const char *in) {
 static char *http_get_one(const char *url) {
     if (!url) return NULL;
     char cmd[2048];
-    /* MTA/Open-Meteo can be slow; 504/timeouts were common at 8s. Longer limits + retries for transient errors. */
     snprintf(cmd, sizeof(cmd),
-             "curl -fsSL --connect-timeout 15 --max-time 45 --retry 3 --retry-delay 2 --retry-connrefused '%s'",
+             "curl -fsSL --connect-timeout 10 --max-time 20 --retry 1 --retry-delay 1 --retry-connrefused '%s'",
              url);
     FILE *fp = popen(cmd, "r");
     if (!fp) return NULL;
@@ -137,11 +136,10 @@ static char *http_get_one(const char *url) {
     return buf;
 }
 
-/* Fetch URL with retries to recover from stale/failed connections. Up to 3 attempts, 2s between. */
 char *http_get(const char *url) {
     if (!url) return NULL;
     char *buf = http_get_one(url);
-    for (int attempt = 0; !buf && attempt < 2; attempt++) {
+    if (!buf) {
         sleep(2);
         buf = http_get_one(url);
     }
