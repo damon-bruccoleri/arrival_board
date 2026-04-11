@@ -79,7 +79,7 @@ void audio_play_flip(const char *flip_path, const char *aplay_device) {
             (void)freopen("/dev/null", "w", stdout);
             if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
             execl("/bin/sh", "sh", "-c",
-                  "command -v paplay >/dev/null 2>&1 && ( command -v sox >/dev/null 2>&1 && sox -q -v 10.0 \"$1\" -t wav - 2>/dev/null | paplay 2>/dev/null ) || paplay \"$1\" 2>/dev/null",
+                  "command -v paplay >/dev/null 2>&1 && ( command -v sox >/dev/null 2>&1 && sox -q -v 5.0 \"$1\" -t wav - 2>/dev/null | paplay 2>/dev/null ) || paplay \"$1\" 2>/dev/null",
                   "sh", flip_path, (char *)NULL);
             _exit(127);
         }
@@ -97,11 +97,11 @@ void audio_play_flip(const char *flip_path, const char *aplay_device) {
         if (audio_debug) {
             /* Show aplay/sox errors when troubleshooting */
             if (execl("/bin/sh", "sh", "-c",
-                      "( command -v sox >/dev/null 2>&1 && sox -q -v 10.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - ) || aplay -q -D \"$2\" \"$1\"",
+                      "( command -v sox >/dev/null 2>&1 && sox -q -v 5.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - ) || aplay -q -D \"$2\" \"$1\"",
                       "sh", flip_path, aplay_device, (char *)NULL) < 0)
                 _exit(127);
         } else if (execl("/bin/sh", "sh", "-c",
-                  "( command -v sox >/dev/null 2>&1 && sox -q -v 10.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - 2>/dev/null ) || aplay -q -D \"$2\" \"$1\" 2>/dev/null",
+                  "( command -v sox >/dev/null 2>&1 && sox -q -v 5.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - 2>/dev/null ) || aplay -q -D \"$2\" \"$1\" 2>/dev/null",
                   "sh", flip_path, aplay_device, (char *)NULL) < 0)
             _exit(127);
         _exit(0);
@@ -148,11 +148,11 @@ void audio_start_music(const char *music_path, const char *music_loop2, const ch
             if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
             if (use_pulse)
                 execl("/bin/sh", "sh", "-c",
-                      "command -v paplay >/dev/null 2>&1 && sleep \"$1\" && while true; do paplay \"$2\" 2>/dev/null; sleep \"$3\"; done",
+                      "command -v paplay >/dev/null 2>&1 && sleep \"$1\" && while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$2\" -t wav - 2>/dev/null | paplay 2>/dev/null ) || paplay \"$2\" 2>/dev/null; sleep \"$3\"; done",
                       "sh", delay_buf, music_loop2, interval_buf, (char *)NULL);
             else
                 execl("/bin/sh", "sh", "-c",
-                      "sleep \"$1\" && while true; do aplay -q -D \"$2\" \"$3\" 2>/dev/null; sleep \"$4\"; done",
+                      "sleep \"$1\" && while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$3\" -t wav - 2>/dev/null | aplay -q -D \"$2\" - 2>/dev/null ) || aplay -q -D \"$2\" \"$3\" 2>/dev/null; sleep \"$4\"; done",
                       "sh", delay_buf, aplay_device, music_loop2, interval_buf, (char *)NULL);
             _exit(127);
         }
@@ -177,20 +177,20 @@ void audio_start_music(const char *music_path, const char *music_loop2, const ch
         if (use_pulse) {
             if (audio_debug)
                 execl("/bin/sh", "sh", "-c",
-                      "command -v paplay >/dev/null 2>&1 && while true; do paplay \"$1\"; sleep \"$2\"; done",
+                      "command -v paplay >/dev/null 2>&1 && while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$1\" -t wav - | paplay ) || paplay \"$1\"; sleep \"$2\"; done",
                       "sh", music_path, gap_buf, (char *)NULL);
             else
                 execl("/bin/sh", "sh", "-c",
-                      "command -v paplay >/dev/null 2>&1 && while true; do paplay \"$1\" 2>/dev/null; sleep \"$2\"; done",
+                      "command -v paplay >/dev/null 2>&1 && while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$1\" -t wav - 2>/dev/null | paplay 2>/dev/null ) || paplay \"$1\" 2>/dev/null; sleep \"$2\"; done",
                       "sh", music_path, gap_buf, (char *)NULL);
         } else {
             if (audio_debug)
                 execl("/bin/sh", "sh", "-c",
-                      "while true; do aplay -q -D \"$1\" \"$2\"; sleep \"$3\"; done",
+                      "while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$2\" -t wav - | aplay -q -D \"$1\" - ) || aplay -q -D \"$1\" \"$2\"; sleep \"$3\"; done",
                       "sh", aplay_device, music_path, gap_buf, (char *)NULL);
             else
                 execl("/bin/sh", "sh", "-c",
-                      "while true; do aplay -q -D \"$1\" \"$2\" 2>/dev/null; sleep \"$3\"; done",
+                      "while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$2\" -t wav - 2>/dev/null | aplay -q -D \"$1\" - 2>/dev/null ) || aplay -q -D \"$1\" \"$2\" 2>/dev/null; sleep \"$3\"; done",
                       "sh", aplay_device, music_path, gap_buf, (char *)NULL);
         }
         _exit(127);

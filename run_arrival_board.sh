@@ -31,8 +31,9 @@ if [ ! -f "$AB_ROOT/tools/asoundrc" ]; then
   echo "$(date -Iseconds): tools/asoundrc missing" >> "$BOOTLOG"
 fi
 
-# Unmute Pi HDMI output (try HDMI control first, then Master; often muted after boot)
-amixer -c vc4hdmi0 set HDMI 100% unmute 2>/dev/null || amixer -c vc4hdmi0 set Master 100% unmute 2>/dev/null || true
+# Unmute Pi HDMI output (try HDMI control first, then Master; often muted after boot).
+# 25% ≈ overall ÷4 vs previous 100% default (see audio.c per-stream gains).
+amixer -c vc4hdmi0 set HDMI 25% unmute 2>/dev/null || amixer -c vc4hdmi0 set Master 25% unmute 2>/dev/null || true
 
 # Start PipeWire or Pulse so kiosk has sound and music+flip mix. Verify with pactl before using.
 ensure_runtime_dir() {
