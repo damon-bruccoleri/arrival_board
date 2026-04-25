@@ -54,6 +54,7 @@ typedef struct {
     int                 n_scheduled;
     Weather             weather;
     char                stop_name[256];
+    char                health_message[768];
     int                 generation;
 
     AppConfig           cfg;
@@ -152,6 +153,62 @@ static void source_health_update(SourceHealth *s, int ok, const char *reason, ti
     s->initialized = 1;
 }
 
+static int config_value_missing(const char *value) {
+    return (!value || !*value || strcmp(value, "Insert MTA key here") == 0);
+}
+
+static int stop_id_format_ok(const char *stop_id) {
+    if (!stop_id || !*stop_id) return 0;
+    for (const char *p = stop_id; *p; p++) {
+        if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+            return 0;
+    }
+    return 1;
+}
+
+static int wifi_connected(void) {
+    int rc = system("sh -c \"nmcli -t -f TYPE,STATE dev status 2>/dev/null | grep -q '^wifi:connected$' || iw dev wlan0 link 2>/dev/null | grep -q '^Connected to '\"");
+    return rc == 0;
+}
+
+static void append_health_line(char *dst, size_t dstsz, const char *line) {
+    if (!dst || dstsz == 0 || !line || !*line) return;
+    size_t n = strlen(dst);
+    if (n > 0 && n + 1 < dstsz) {
+        dst[n++] = '\n';
+        dst[n] = '\0';
+    }
+    if (n < dstsz)
+        snprintf(dst + n, dstsz - n, "%s", line);
+}
+
+static void build_health_message(const AppConfig *cfg, int wifi_ok, int stop_known,
+                                 const SourceHealth *mta_h, char *dst, size_t dstsz) {
+    if (!dst || dstsz == 0) return;
+    dst[0] = '\0';
+
+    if (!wifi_ok)
+        append_health_line(dst, dstsz, "WiFi is not connected or is not configured.");
+
+    if (!cfg || config_value_missing(cfg->mta_key)) {
+        append_health_line(dst, dstsz, "MTA API key is missing or still set to the placeholder.");
+    } else if (wifi_ok && mta_h && mta_h->consecutive_failures >= 2) {
+        char line[192];
+        snprintf(line, sizeof(line), "MTA API key/request is not working (%s).", mta_last_status_str());
+        append_health_line(dst, dstsz, line);
+    }
+
+    if (!cfg || !cfg->stop_id[0]) {
+        append_health_line(dst, dstsz, "Bus stop number is not configured.");
+    } else if (!stop_id_format_ok(cfg->stop_id)) {
+        append_health_line(dst, dstsz, "Bus stop number contains invalid whitespace.");
+    } else if (stop_known == 0) {
+        char line[192];
+        snprintf(line, sizeof(line), "Bus stop number %s was not found in the MTA bus feed.", cfg->stop_id);
+        append_health_line(dst, dstsz, line);
+    }
+}
+
 static void on_flip_ended(void *userdata) {
     FlipSoundCtx *ctx = (FlipSoundCtx *)userdata;
     if (!ctx || !ctx->flip_path || !ctx->flip_path[0]) return;
@@ -236,6 +293,13 @@ static void *fetch_loop(void *arg) {
             n_sched = out;
         }
 
+        int stop_known = -1;
+        if (cfg->stop_id[0] && gtfs_last_status() == 0)
+            stop_known = gtfs_stop_known(cfg->stop_id);
+        char health_message[sizeof(ctx->health_message)];
+        build_health_message(cfg, wifi_connected(), stop_known,
+                             &mta_h, health_message, sizeof(health_message));
+
         /* --- Publish results --- */
         pthread_mutex_lock(&ctx->lock);
         if (n_new >= 0) {
@@ -247,6 +311,7 @@ static void *fetch_loop(void *arg) {
         ctx->weather = persist_wx;
         memcpy(ctx->scheduled, local_sched, sizeof(ScheduledDeparture) * (size_t)n_sched);
         ctx->n_scheduled = n_sched;
+        snprintf(ctx->health_message, sizeof(ctx->health_message), "%s", health_message);
         ctx->generation++;
         pthread_mutex_unlock(&ctx->lock);
 
@@ -285,6 +350,8 @@ int main(int argc, char **argv) {
 
     AppConfig cfg;
     config_from_env(&cfg);
+    char local_health[768] = {0};
+    build_health_message(&cfg, wifi_connected(), -1, NULL, local_health, sizeof(local_health));
 
     ConfigMode config_mode;
     config_mode_init(&config_mode);
@@ -386,7 +453,7 @@ int main(int argc, char **argv) {
                   res.bg_tex, res.steam_tex, res.logo_tex,
                   res.wide_tile_tex, res.narrow_tile_tex,
                   res.symbol_font, res.emoji_font,
-                  NULL, NULL);
+                  NULL, NULL, local_health);
     }
 
     /* ---- Start background fetch thread ----------------------------------- */
@@ -398,6 +465,7 @@ int main(int argc, char **argv) {
     fctx.weather.precip_prob = -1;
     fctx.weather.precip_in   = -1.0;
     fctx.weather.moon_phase  = -1.f;
+    snprintf(fctx.health_message, sizeof(fctx.health_message), "%s", local_health);
     if (cfg.stop_name_override[0])
         snprintf(fctx.stop_name, sizeof(fctx.stop_name), "%s", cfg.stop_name_override);
     int fetch_started = 0;
@@ -425,7 +493,9 @@ int main(int argc, char **argv) {
     const char *ferry_path = cfg.music_loop2_path[0] ? cfg.music_loop2_path : cfg.flip_path;
     AppMode app_mode = APP_RUNNING;
     char config_status[256] = "Ready";
-    time_t config_started_at = 0;
+    time_t config_unconnected_since = 0;
+    time_t config_ap_checked_at = 0;
+    int config_ap_client_connected = 0;
 
     /* ---- Main render loop ------------------------------------------------ */
     for (;;) {
@@ -447,19 +517,35 @@ int main(int argc, char **argv) {
                 app_mode = APP_CONFIG_MODE;
             else
                 app_mode = APP_CONFIG_APPLYING;
-            config_started_at = time(NULL);
+            config_unconnected_since = time(NULL);
+            config_ap_checked_at = 0;
+            config_ap_client_connected = 0;
         }
 
         if (app_mode != APP_RUNNING) {
             int exit_config = 0;
-            if (app_mode == APP_CONFIG_MODE) {
-                if (config_started_at > 0 && difftime(time(NULL), config_started_at) >= 60.0) {
-                    logf_("CONFIG_MODE timeout: returning to Arrival Board");
-                    exit_config = 1;
-                } else if (config_mode_poll_pressed(&config_mode)) {
-                    logf_("CONFIG_MODE button pressed again: returning to Arrival Board");
-                    exit_config = 1;
-                }
+            config_mode_read_status(&config_mode, config_status, sizeof(config_status));
+            time_t config_now = time(NULL);
+            if (config_ap_checked_at == 0 || difftime(config_now, config_ap_checked_at) >= 1.0) {
+                config_ap_client_connected = config_mode_ap_client_connected();
+                config_ap_checked_at = config_now;
+            }
+            int setup_connected = strstr(config_status, "Connected") != NULL ||
+                                  config_ap_client_connected;
+            if (setup_connected) {
+                config_unconnected_since = 0;
+            } else if (config_unconnected_since == 0) {
+                config_unconnected_since = config_now;
+            }
+            if (config_mode_poll_pressed(&config_mode)) {
+                logf_("CONFIG_MODE button pressed again: returning to Arrival Board");
+                exit_config = 1;
+            } else if (app_mode == APP_CONFIG_MODE &&
+                       !setup_connected &&
+                       config_unconnected_since > 0 &&
+                       difftime(config_now, config_unconnected_since) >= 60.0) {
+                logf_("CONFIG_MODE timeout with no AP client: returning to Arrival Board");
+                exit_config = 1;
             }
             if (exit_config) {
                 config_mode_stop_helper(&config_mode);
@@ -469,17 +555,18 @@ int main(int argc, char **argv) {
                                       cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
                                       cfg.aplay_device[0] ? cfg.aplay_device : NULL);
                 app_mode = APP_RUNNING;
-                config_started_at = 0;
+                config_unconnected_since = 0;
+                config_ap_checked_at = 0;
+                config_ap_client_connected = 0;
                 local_gen = -1;
                 continue;
             }
 
             SDL_GetRendererOutputSize(r, &W, &H);
-            config_mode_read_status(&config_mode, config_status, sizeof(config_status));
             if (strstr(config_status, "Applying") || strstr(config_status, "Reboot"))
                 app_mode = APP_CONFIG_APPLYING;
             ui_render_config(r, &res.fonts, W, H, config_status);
-            SDL_Delay(100);
+            SDL_Delay(16);
             continue;
         }
 
@@ -506,6 +593,7 @@ int main(int argc, char **argv) {
                 snprintf(local_sn, sizeof(local_sn), "%s", fctx.stop_name);
             local_gen = fctx.generation;
         }
+        snprintf(local_health, sizeof(local_health), "%s", fctx.health_message);
         pthread_mutex_unlock(&fctx.lock);
 
         if (play_ferry) {
@@ -530,7 +618,8 @@ int main(int argc, char **argv) {
                   res.wide_tile_tex, res.narrow_tile_tex,
                   res.symbol_font, res.emoji_font,
                   cfg.flip_path[0] ? on_flip_ended : NULL,
-                  cfg.flip_path[0] ? (void *)&flip_ctx : NULL);
+                  cfg.flip_path[0] ? (void *)&flip_ctx : NULL,
+                  local_health);
 
         SDL_Delay(16);
     }

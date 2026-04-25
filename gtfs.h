@@ -16,6 +16,10 @@ void gtfs_load(const char *gtfs_url, const char *cache_path);
 int gtfs_next_departures(const char *stop_id, const char *realtime_routes,
                          ScheduledDeparture *out, int max_out);
 
+/* Returns 1 if the loaded GTFS feed contains stop_id as a stop_id or stop_code.
+ * Returns 0 if the feed is loaded and the stop is unknown, or -1 if unavailable. */
+int gtfs_stop_known(const char *stop_id);
+
 /* Last GTFS load status for debug instrumentation. */
 int gtfs_last_status(void);
 const char *gtfs_last_status_str(void);

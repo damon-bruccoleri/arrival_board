@@ -944,6 +944,46 @@ static void draw_tile_grid(SDL_Renderer *r, Fonts *f, int W, int body_y, int bod
         on_flip_ended(flip_userdata);
 }
 
+static void draw_health_overlay(SDL_Renderer *r, Fonts *f, int W, int H, const char *message) {
+    if (!message || !message[0]) return;
+
+    float scale = layout_scale(H);
+    SDL_Color white  = { 255, 255, 255, 255 };
+    SDL_Color accent = { 100, 220, 255, 255 };
+    SDL_Color warn   = { 255, 210, 90, 255 };
+
+    SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(r, 0, 0, 0, 175);
+    SDL_Rect shade = { 0, 0, W, H };
+    SDL_RenderFillRect(r, &shade);
+
+    int panel_w = clampi((int)(W * 0.72f), 560, W - 80);
+    int panel_h = clampi((int)(H * 0.56f), 330, H - 80);
+    SDL_Rect panel = { (W - panel_w) / 2, (H - panel_h) / 2, panel_w, panel_h };
+    int radius = clampi((int)(30 * scale), 14, 48);
+    SDL_SetRenderDrawColor(r, 22, 26, 34, 245);
+    fill_round_rect(r, panel, radius);
+
+    int x = panel.x + clampi((int)(58 * scale), 28, 90);
+    int y = panel.y + clampi((int)(56 * scale), 26, 80);
+    int line_gap = clampi((int)(54 * scale), 30, 72);
+
+    draw_text(r, f->h1, "Setup Required", panel.x + panel.w / 2, y, warn, 1);
+    y += clampi((int)(88 * scale), 48, 118);
+
+    char copy[768];
+    snprintf(copy, sizeof(copy), "%s", message);
+    char *save = NULL;
+    for (char *line = strtok_r(copy, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+        draw_text(r, f->h2, line, x, y, white, 0);
+        y += line_gap;
+        if (y > panel.y + panel.h - 2 * line_gap) break;
+    }
+
+    y = panel.y + panel.h - clampi((int)(92 * scale), 54, 124);
+    draw_text(r, f->h2, "Press the configure button on the Raspberry Pi Zero to run setup.", x, y, accent, 0);
+}
+
 void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
                const char *stop_id, const char *stop_name,
                Weather *wx, Arrival *arr, int n,
@@ -951,7 +991,8 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
                SDL_Texture *bg_tex, SDL_Texture *steam_tex, SDL_Texture *logo_tex,
                SDL_Texture *wide_tile_tex, SDL_Texture *narrow_tile_tex,
                TTF_Font *symbol_font, TTF_Font *emoji_font,
-               void (*on_flip_ended)(void*), void *flip_userdata) {
+               void (*on_flip_ended)(void*), void *flip_userdata,
+               const char *health_message) {
     SDL_Color white = { 255, 255, 255, 255 };
 
     SDL_SetRenderDrawColor(r, 10, 12, 16, 255);
@@ -976,11 +1017,13 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
 
     if (n <= 0 && ( !scheduled || ns <= 0)) {
         draw_text(r, f->h1, "No upcoming buses", W / 2, body_y + body_h / 2, white, 1);
+        draw_health_overlay(r, f, W, H, health_message);
         SDL_RenderPresent(r);
         return;
     }
 
     draw_tile_grid(r, f, W, body_y, body_h, pad, arr, n, scheduled ? scheduled : (ScheduledDeparture *)0, scheduled ? ns : 0, scale, wide_tile_tex, narrow_tile_tex, on_flip_ended, flip_userdata);
+    draw_health_overlay(r, f, W, H, health_message);
     SDL_RenderPresent(r);
 }
 
@@ -1023,7 +1066,7 @@ void ui_render_config(SDL_Renderer *r, Fonts *f, int W, int H, const char *statu
     snprintf(line, sizeof(line), "4. Open: http://%s", ap_addr);
     draw_text(r, f->h2, line, x, y, accent, 0);
     y += gap;
-    draw_text(r, f->h2, "5. Enter your MTA key and WiFi details, then tap Configure.", x, y, white, 0);
+    draw_text(r, f->h2, "5. Enter your MTA key, bus stop ID, and WiFi details.", x, y, white, 0);
     y += gap_big;
 
     char status_line[320];

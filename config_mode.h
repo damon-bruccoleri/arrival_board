@@ -30,3 +30,6 @@ void config_mode_stop_helper(ConfigMode *cm);
 
 /* Reads a short status string from the helper. */
 void config_mode_read_status(const ConfigMode *cm, char *dst, size_t dstsz);
+
+/* Returns 1 when a phone/client is associated with the setup AP. */
+int  config_mode_ap_client_connected(void);

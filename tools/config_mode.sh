@@ -13,10 +13,18 @@ status() {
 }
 
 monitor_phone_connection() {
+  local connected=0
   while true; do
     if iw dev "$IFACE" station dump 2>/dev/null | grep -q '^Station '; then
-      status "Connected"
-      return 0
+      if [ "$connected" -ne 1 ]; then
+        status "Connected"
+        connected=1
+      fi
+    else
+      if [ "$connected" -ne 0 ]; then
+        status "Hotspot enabled. Connect to ArrivalBoard"
+        connected=0
+      fi
     fi
     sleep 1
   done
@@ -24,6 +32,8 @@ monitor_phone_connection() {
 
 case "${1:-}" in
   start)
+    status "Loading bus stop list"
+    python3 "$ROOT_DIR/tools/config_portal/portal.py" --refresh-stops >/dev/null 2>&1 || true
     status "Starting hotspot"
     sudo -n "$SCRIPT_DIR/config_network.sh" start-ap
     status "Hotspot enabled. Connect to ArrivalBoard"

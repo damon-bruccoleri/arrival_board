@@ -5,6 +5,7 @@
 #include "util.h"
 
 #include <errno.h>
+#include <ctype.h>
 #include <fcntl.h>
 #include <gpiod.h>
 #include <stdio.h>
@@ -192,4 +193,35 @@ void config_mode_read_status(const ConfigMode *cm, char *dst, size_t dstsz) {
             dst[--n] = '\0';
     }
     fclose(f);
+}
+
+int config_mode_ap_client_connected(void) {
+    const char *env_iface = getenv("CONFIG_WIFI_IFACE");
+    const char *iface = (env_iface && *env_iface) ? env_iface : "wlan0";
+    char safe_iface[32];
+    size_t n = 0;
+    for (const char *p = iface; *p && n + 1 < sizeof(safe_iface); p++) {
+        unsigned char ch = (unsigned char)*p;
+        if (!(isalnum(ch) || ch == '_' || ch == '-' || ch == '.'))
+            return 0;
+        safe_iface[n++] = (char)ch;
+    }
+    safe_iface[n] = '\0';
+    if (!safe_iface[0]) return 0;
+
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "iw dev %s station dump 2>/dev/null", safe_iface);
+    FILE *fp = popen(cmd, "r");
+    if (!fp) return 0;
+
+    char line[128];
+    int connected = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "Station ", 8) == 0) {
+            connected = 1;
+            break;
+        }
+    }
+    pclose(fp);
+    return connected;
 }

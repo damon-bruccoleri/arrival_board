@@ -437,6 +437,17 @@ int gtfs_last_status(void) {
     return g_gtfs_last_status;
 }
 
+int gtfs_stop_known(const char *stop_id) {
+    if (!feed.loaded || !stop_id || !*stop_id) return -1;
+    for (int i = 0; i < feed.n_stops; i++) {
+        if (strcmp(feed.stops[i].stop_id, stop_id) == 0)
+            return 1;
+        if (feed.stops[i].stop_code[0] && strcmp(feed.stops[i].stop_code, stop_id) == 0)
+            return 1;
+    }
+    return 0;
+}
+
 const char *gtfs_last_status_str(void) {
     switch (g_gtfs_last_status) {
         case GTFS_STATUS_OK:            return "OK";
