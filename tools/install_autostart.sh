@@ -33,6 +33,9 @@ WantedBy=default.target
 UNIT
 
 chmod +x "${REPO_ROOT}/run_arrival_board.sh" 2>/dev/null || true
+chmod +x "${REPO_ROOT}/tools/config_mode.sh" \
+         "${REPO_ROOT}/tools/config_network.sh" \
+         "${REPO_ROOT}/tools/config_portal/portal.py" 2>/dev/null || true
 
 systemctl --user daemon-reload
 systemctl --user enable arrival-board.service

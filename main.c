@@ -7,6 +7,7 @@
  */
 #include "audio.h"
 #include "config.h"
+#include "config_mode.h"
 #include "gtfs.h"
 #include "mta.h"
 #include "tile.h"
@@ -71,6 +72,32 @@ typedef struct {
     SDL_Texture  *wide_tile_tex;
     SDL_Texture  *narrow_tile_tex;
 } Resources;
+
+typedef enum {
+    APP_RUNNING = 0,
+    APP_CONFIG_MODE,
+    APP_CONFIG_APPLYING
+} AppMode;
+
+static void *fetch_loop(void *arg);
+
+static void stop_fetch_thread(FetchCtx *fctx, int *fetch_started) {
+    if (!fctx || !fetch_started || !*fetch_started) return;
+    fctx->running = 0;
+    pthread_join(fctx->tid, NULL);
+    *fetch_started = 0;
+}
+
+static void start_fetch_thread(FetchCtx *fctx, int *fetch_started) {
+    if (!fctx || !fetch_started || *fetch_started) return;
+    fctx->running = 1;
+    if (pthread_create(&fctx->tid, NULL, fetch_loop, fctx) == 0) {
+        *fetch_started = 1;
+    } else {
+        logf_("Failed to start fetch thread");
+        fctx->running = 0;
+    }
+}
 
 static void resources_destroy(Resources *res) {
     if (res->bg_tex)          SDL_DestroyTexture(res->bg_tex);
@@ -259,6 +286,9 @@ int main(int argc, char **argv) {
     AppConfig cfg;
     config_from_env(&cfg);
 
+    ConfigMode config_mode;
+    config_mode_init(&config_mode);
+
     Resources res;
     memset(&res, 0, sizeof(res));
 
@@ -370,7 +400,8 @@ int main(int argc, char **argv) {
     fctx.weather.moon_phase  = -1.f;
     if (cfg.stop_name_override[0])
         snprintf(fctx.stop_name, sizeof(fctx.stop_name), "%s", cfg.stop_name_override);
-    pthread_create(&fctx.tid, NULL, fetch_loop, &fctx);
+    int fetch_started = 0;
+    start_fetch_thread(&fctx, &fetch_started);
 
     /* ---- Render-loop local state ----------------------------------------- */
     Arrival local_arr[TILE_SLOTS_MAX];
@@ -392,6 +423,9 @@ int main(int argc, char **argv) {
 
     int local_gen = -1;
     const char *ferry_path = cfg.music_loop2_path[0] ? cfg.music_loop2_path : cfg.flip_path;
+    AppMode app_mode = APP_RUNNING;
+    char config_status[256] = "Ready";
+    time_t config_started_at = 0;
 
     /* ---- Main render loop ------------------------------------------------ */
     for (;;) {
@@ -404,6 +438,50 @@ int main(int argc, char **argv) {
 
         /* Reap zombie child processes (audio fork/exec). */
         while (waitpid(-1, NULL, WNOHANG) > 0) {}
+
+        if (app_mode == APP_RUNNING && config_mode_poll_pressed(&config_mode)) {
+            logf_("CONFIG_MODE entering after GPIO13 press");
+            stop_fetch_thread(&fctx, &fetch_started);
+            audio_stop_music();
+            if (config_mode_start_helper(&config_mode) == 0)
+                app_mode = APP_CONFIG_MODE;
+            else
+                app_mode = APP_CONFIG_APPLYING;
+            config_started_at = time(NULL);
+        }
+
+        if (app_mode != APP_RUNNING) {
+            int exit_config = 0;
+            if (app_mode == APP_CONFIG_MODE) {
+                if (config_started_at > 0 && difftime(time(NULL), config_started_at) >= 60.0) {
+                    logf_("CONFIG_MODE timeout: returning to Arrival Board");
+                    exit_config = 1;
+                } else if (config_mode_poll_pressed(&config_mode)) {
+                    logf_("CONFIG_MODE button pressed again: returning to Arrival Board");
+                    exit_config = 1;
+                }
+            }
+            if (exit_config) {
+                config_mode_stop_helper(&config_mode);
+                start_fetch_thread(&fctx, &fetch_started);
+                if (access(cfg.music_path, R_OK) == 0)
+                    audio_start_music(cfg.music_path,
+                                      cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
+                                      cfg.aplay_device[0] ? cfg.aplay_device : NULL);
+                app_mode = APP_RUNNING;
+                config_started_at = 0;
+                local_gen = -1;
+                continue;
+            }
+
+            SDL_GetRendererOutputSize(r, &W, &H);
+            config_mode_read_status(&config_mode, config_status, sizeof(config_status));
+            if (strstr(config_status, "Applying") || strstr(config_status, "Reboot"))
+                app_mode = APP_CONFIG_APPLYING;
+            ui_render_config(r, &res.fonts, W, H, config_status);
+            SDL_Delay(100);
+            continue;
+        }
 
         /* Pick up new data from the fetch thread (fast: just a memcpy under lock). */
         int play_ferry = 0;
@@ -458,9 +536,9 @@ int main(int argc, char **argv) {
     }
 
 done:
-    fctx.running = 0;
-    pthread_join(fctx.tid, NULL);
+    stop_fetch_thread(&fctx, &fetch_started);
     pthread_mutex_destroy(&fctx.lock);
+    config_mode_destroy(&config_mode);
     audio_stop_music();
     resources_destroy(&res);
     return 0;

@@ -18,3 +18,6 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
                SDL_Texture *wide_tile_tex, SDL_Texture *narrow_tile_tex,
                TTF_Font *symbol_font, TTF_Font *emoji_font,
                void (*on_flip_ended)(void*), void *flip_userdata);
+
+/* Render the phone setup instructions while Arrival Board is suspended. */
+void ui_render_config(SDL_Renderer *r, Fonts *f, int W, int H, const char *status);

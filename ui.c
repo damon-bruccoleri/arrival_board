@@ -983,3 +983,52 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
     draw_tile_grid(r, f, W, body_y, body_h, pad, arr, n, scheduled ? scheduled : (ScheduledDeparture *)0, scheduled ? ns : 0, scale, wide_tile_tex, narrow_tile_tex, on_flip_ended, flip_userdata);
     SDL_RenderPresent(r);
 }
+
+void ui_render_config(SDL_Renderer *r, Fonts *f, int W, int H, const char *status) {
+    SDL_Color white  = { 255, 255, 255, 255 };
+    SDL_Color accent = { 100, 220, 255, 255 };
+    SDL_Color warn   = { 255, 200, 80, 255 };
+
+    SDL_SetRenderDrawColor(r, 10, 12, 16, 255);
+    SDL_RenderClear(r);
+
+    float scale = layout_scale(H);
+    int pad = clampi((int)(70 * scale), 28, 120);
+    int radius = clampi((int)(30 * scale), 12, 48);
+    SDL_Rect panel = { pad, pad, W - 2 * pad, H - 2 * pad };
+    SDL_SetRenderDrawColor(r, 22, 26, 34, 255);
+    fill_round_rect(r, panel, radius);
+
+    int x = panel.x + clampi((int)(90 * scale), 36, 140);
+    int y = panel.y + clampi((int)(90 * scale), 40, 160);
+    int gap_big = clampi((int)(125 * scale), 58, 170);
+    int gap = clampi((int)(80 * scale), 38, 110);
+
+    draw_text(r, f->h1, "Arrival Board Setup", W / 2, y, white, 1);
+    y += gap_big;
+
+    const char *ap_ssid = getenv("CONFIG_AP_SSID");
+    const char *ap_addr = getenv("CONFIG_AP_ADDR");
+    if (!ap_ssid || !ap_ssid[0]) ap_ssid = "ArrivalBoard";
+    if (!ap_addr || !ap_addr[0]) ap_addr = "192.168.4.1";
+
+    draw_text(r, f->h2, "1. On your phone, open WiFi settings.", x, y, white, 0);
+    y += gap;
+    char line[320];
+    snprintf(line, sizeof(line), "2. Join network: %s", ap_ssid);
+    draw_text(r, f->h2, line, x, y, accent, 0);
+    y += gap;
+    draw_text(r, f->h2, "3. No WiFi password is required.", x, y, accent, 0);
+    y += gap;
+    snprintf(line, sizeof(line), "4. Open: http://%s", ap_addr);
+    draw_text(r, f->h2, line, x, y, accent, 0);
+    y += gap;
+    draw_text(r, f->h2, "5. Enter your MTA key and WiFi details, then tap Configure.", x, y, white, 0);
+    y += gap_big;
+
+    char status_line[320];
+    snprintf(status_line, sizeof(status_line), "Status: %s", (status && status[0]) ? status : "Starting hotspot");
+    draw_text(r, f->h2, status_line, x, y, warn, 0);
+
+    SDL_RenderPresent(r);
+}

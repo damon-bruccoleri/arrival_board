@@ -45,10 +45,14 @@ PKGS=(
   libsdl2-dev libsdl2-ttf-dev libsdl2-image-dev
   # JSON
   libcjson-dev
+  # GPIO input for setup switch
+  libgpiod-dev gpiod
   # Fonts
   fonts-noto-core fonts-noto-color-emoji
   # Audio (PipeWire + paplay)
   pipewire pipewire-pulse wireplumber pulseaudio-utils alsa-utils
+  # Phone setup hotspot / WiFi configuration
+  hostapd dnsmasq iw iptables network-manager python3
   # Utilities
   curl unzip git
   # Dev convenience
@@ -216,6 +220,18 @@ log "10/11  Installing systemd user service for auto-start"
 bash "$SCRIPT_DIR/install_autostart.sh"
 echo "  arrival-board.service installed (starts on boot after reboot)"
 
+# Allow the kiosk process to start the setup hotspot and apply WiFi without an
+# interactive sudo password. The web portal still only exposes this helper while
+# the physical GPIO13 setup switch is pressed.
+SUDOERS_FILE="/etc/sudoers.d/arrival-board-config"
+sudo tee "$SUDOERS_FILE" >/dev/null <<EOF
+$(id -un) ALL=(root) NOPASSWD: ${PROJECT_DIR}/tools/config_network.sh *
+EOF
+sudo chmod 0440 "$SUDOERS_FILE"
+sudo visudo -cf "$SUDOERS_FILE" >/dev/null
+chmod +x "$PROJECT_DIR/tools/config_mode.sh" "$PROJECT_DIR/tools/config_network.sh" "$PROJECT_DIR/tools/config_portal/portal.py" 2>/dev/null || true
+echo "  config-mode sudo helper installed"
+
 # ---------------------------------------------------------------------------
 # 11. Summary
 # ---------------------------------------------------------------------------
@@ -225,6 +241,7 @@ cat <<'EOF'
   What was done:
     - System packages updated
     - Build deps, SDL2, fonts, PipeWire, zram installed
+    - GPIO, hotspot, and WiFi setup dependencies installed
     - gpu_mem=128, arm_boost=1, vc4-kms-v3d confirmed
     - CPU governor set to performance
     - Disk swap disabled, zram enabled, tmpfs for /tmp and /var/log
@@ -233,6 +250,7 @@ cat <<'EOF'
     - arrival_board.env created (if new)
     - Project built (make; SDL2_image required)
     - arrival-board.service enabled for auto-start
+    - GPIO13 setup-mode helper permission installed
 
   Next steps:
     1. Edit ~/arrival_board/arrival_board.env

@@ -8,16 +8,16 @@ SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null || echo -lSDL2)
 
 CFLAGS = -O2 -std=c11 -Wall -Wextra -Wshadow -Wformat=2 -D_GNU_SOURCE $(SDL_CFLAGS)
 LDFLAGS =
-LIBS = $(SDL_LIBS) -lSDL2_ttf -lSDL2_image -lcjson -lm -pthread
+LIBS = $(SDL_LIBS) -lSDL2_ttf -lSDL2_image -lcjson -lgpiod -lm -pthread
 
-OBJS = main.o audio.o config.o gtfs.o tile.o texture.o ui.o util.o mta.o weather.o
+OBJS = main.o audio.o config.o config_mode.o gtfs.o tile.o texture.o ui.o util.o mta.o weather.o
 
 all: arrival_board
 
 arrival_board: $(OBJS)
 	$(CC) $(LDFLAGS) -o $@ $(OBJS) $(LIBS)
 
-main.o: main.c audio.h config.h gtfs.h mta.h tile.h texture.h types.h ui.h util.h weather.h
+main.o: main.c audio.h config.h config_mode.h gtfs.h mta.h tile.h texture.h types.h ui.h util.h weather.h
 	$(CC) $(CFLAGS) -c -o $@ main.c
 
 audio.o: audio.c audio.h types.h
@@ -25,6 +25,9 @@ audio.o: audio.c audio.h types.h
 
 config.o: config.c config.h util.h
 	$(CC) $(CFLAGS) -c -o $@ config.c
+
+config_mode.o: config_mode.c config_mode.h util.h
+	$(CC) $(CFLAGS) -c -o $@ config_mode.c
 
 gtfs.o: gtfs.c gtfs.h types.h util.h
 	$(CC) $(CFLAGS) -c -o $@ gtfs.c
