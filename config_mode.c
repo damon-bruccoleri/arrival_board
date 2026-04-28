@@ -20,6 +20,11 @@
 #define CONFIG_GPIO_LINE 13
 #define CONFIG_DEBOUNCE_FRAMES 4
 
+/* Debian bookworm / libgpiod 1.x: chip + line API. libgpiod 2.x: line_request API. */
+#if defined(GPIOD_LINE_BULK_MAX_LINES)
+#define CONFIG_MODE_GPIOD_V1 1
+#endif
+
 static const char *status_path_default(void) {
     const char *p = getenv("CONFIG_STATUS_PATH");
     return (p && *p) ? p : "/tmp/arrival_board_config_status";
@@ -45,6 +50,22 @@ int config_mode_init(ConfigMode *cm) {
         return -1;
     }
 
+#ifdef CONFIG_MODE_GPIOD_V1
+    struct gpiod_line *line = gpiod_chip_get_line(chip, CONFIG_GPIO_LINE);
+    if (!line) {
+        logf_("CONFIG_MODE GPIO unavailable: line %d not found", CONFIG_GPIO_LINE);
+        gpiod_chip_close(chip);
+        return -1;
+    }
+    if (gpiod_line_request_input_flags(line, "arrival-board-config",
+                                       GPIOD_LINE_REQUEST_FLAG_BIAS_PULL_UP) != 0) {
+        logf_("CONFIG_MODE GPIO unavailable: line request failed: %s", strerror(errno));
+        gpiod_chip_close(chip);
+        return -1;
+    }
+    cm->chip = chip;
+    cm->request = line;
+#else
     struct gpiod_line_settings *settings = gpiod_line_settings_new();
     struct gpiod_line_config *line_cfg = gpiod_line_config_new();
     struct gpiod_request_config *req_cfg = gpiod_request_config_new();
@@ -82,6 +103,7 @@ int config_mode_init(ConfigMode *cm) {
 
     cm->chip = chip;
     cm->request = request;
+#endif
     cm->gpio_ready = 1;
     cm->last_value = 1;
     cm->stable_count = 0;
@@ -92,10 +114,17 @@ int config_mode_init(ConfigMode *cm) {
 
 void config_mode_destroy(ConfigMode *cm) {
     if (!cm) return;
+#ifdef CONFIG_MODE_GPIOD_V1
+    if (cm->request) {
+        gpiod_line_release((struct gpiod_line *)cm->request);
+        cm->request = NULL;
+    }
+#else
     if (cm->request) {
         gpiod_line_request_release((struct gpiod_line_request *)cm->request);
         cm->request = NULL;
     }
+#endif
     if (cm->chip) {
         gpiod_chip_close((struct gpiod_chip *)cm->chip);
         cm->chip = NULL;
@@ -106,13 +135,23 @@ void config_mode_destroy(ConfigMode *cm) {
 int config_mode_poll_pressed(ConfigMode *cm) {
     if (!cm || !cm->gpio_ready || !cm->request) return 0;
 
+    int value;
+#ifdef CONFIG_MODE_GPIOD_V1
+    int v = gpiod_line_get_value((struct gpiod_line *)cm->request);
+    if (v < 0) {
+        logf_("CONFIG_MODE GPIO read failed: %s", strerror(errno));
+        return 0;
+    }
+    value = v;
+#else
     enum gpiod_line_value line_value =
         gpiod_line_request_get_value((struct gpiod_line_request *)cm->request, CONFIG_GPIO_LINE);
     if (line_value < 0) {
         logf_("CONFIG_MODE GPIO read failed: %s", strerror(errno));
         return 0;
     }
-    int value = (line_value == GPIOD_LINE_VALUE_ACTIVE) ? 1 : 0;
+    value = (line_value == GPIOD_LINE_VALUE_ACTIVE) ? 1 : 0;
+#endif
 
     if (value == cm->last_value) {
         if (cm->stable_count < CONFIG_DEBOUNCE_FRAMES)
