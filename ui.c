@@ -66,7 +66,13 @@ static void tile_draw_fallback_panel(SDL_Renderer *r, SDL_Rect rect, int radius)
 #define FLIP_DURATION_MS       520
 #define FLIP_STAGGER_MS        48.f
 #define DIVIDER_H              2
-#define FLIP_TILE_EDGE_MAX_PX  15
+#define FLIP_TILE_EDGE_MAX_PX  0
+
+static int flip_edge_max_scaled(float scale) {
+    if (FLIP_TILE_EDGE_MAX_PX < 1)
+        return 0;
+    return clampi((int)((float)FLIP_TILE_EDGE_MAX_PX * scale), 6, FLIP_TILE_EDGE_MAX_PX);
+}
 
 typedef struct {
     float x, y, alpha, scale, rise;
@@ -758,8 +764,7 @@ static void draw_split_flap(SDL_Renderer *r, SDL_Texture *tex_old, SDL_Texture *
             SDL_RenderCopy(r, tex_old, &src_top, &dst_flap);
         }
 
-        int max_edge = clampi((int)((float)FLIP_TILE_EDGE_MAX_PX * scale), 6,
-                              FLIP_TILE_EDGE_MAX_PX);
+        int max_edge = flip_edge_max_scaled(scale);
         int thick = flip_edge_thickness_px(flap_h, half_h, max_edge);
         if (thick > 0) {
             draw_tile_thickness_edge(r, rect.x, mid_y, rect.w, thick);
@@ -789,8 +794,7 @@ static void draw_split_flap(SDL_Renderer *r, SDL_Texture *tex_old, SDL_Texture *
             SDL_RenderCopy(r, tex_new, &src_bot, &dst_flap);
         }
 
-        int max_edge = clampi((int)((float)FLIP_TILE_EDGE_MAX_PX * scale), 6,
-                              FLIP_TILE_EDGE_MAX_PX);
+        int max_edge = flip_edge_max_scaled(scale);
         int thick = flip_edge_thickness_px(flap_h, bot_h, max_edge);
         if (thick > 0) {
             draw_tile_thickness_edge(r, rect.x, mid_y, rect.w, thick);

@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# setup_pi.sh — Prepare a fresh Raspberry Pi Zero 2 W (64-bit Lite) for Arrival Board.
+# setup_pi.sh — Prepare a fresh Raspberry Pi for Arrival Board (Pi Zero / Zero W 32-bit
+# Lite, or Pi Zero 2 W with 32- or 64-bit Lite). Not specific to Zero 2 W only.
 #
 # Usage:
 #   git clone git@github.com:damon-bruccoleri/arrival_board.git ~/arrival_board
 #   cd ~/arrival_board && bash tools/setup_pi.sh
+#
+# From a dev PC you can push the tree first: bash tools/sync_repo_to_pi.sh user@host
 #
 # Safe to re-run (idempotent). Requires sudo for system changes.
 # After the script finishes, edit ~/arrival_board/arrival_board.env and reboot.
@@ -35,14 +38,14 @@ fi
 # ---------------------------------------------------------------------------
 # 1. System update
 # ---------------------------------------------------------------------------
-log "1/11  Updating system packages"
+log "1/12  Updating system packages"
 sudo apt-get update -qq
 sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y -qq
 
 # ---------------------------------------------------------------------------
 # 2. Install build and runtime dependencies
 # ---------------------------------------------------------------------------
-log "2/11  Installing Arrival Board dependencies"
+log "2/12  Installing Arrival Board dependencies"
 PKGS=(
   # Build
   build-essential pkg-config
@@ -64,7 +67,7 @@ PKGS=(
   ca-certificates curl unzip git sox
   # Dev convenience
   htop
-  # zram (step 6)
+  # zram (SD hardening step)
   zram-tools
 )
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}"
@@ -72,7 +75,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}"
 # ---------------------------------------------------------------------------
 # 3. GPU memory split
 # ---------------------------------------------------------------------------
-log "3/11  Configuring GPU memory (128 MB)"
+log "3/12  Configuring GPU memory (128 MB)"
 sudo cp -n "$BOOT_CONFIG" "${BOOT_CONFIG}.bak" 2>/dev/null || true
 
 ensure_config() {
@@ -106,7 +109,10 @@ if ! grep -q '^dtoverlay=vc4-kms-v3d' "$BOOT_CONFIG" 2>/dev/null; then
   ensure_boot_config_line "dtoverlay=vc4-kms-v3d"
 fi
 
-echo "  gpu_mem=128, arm_boost=1, disable_overscan=1, dwc2, vc4-kms-v3d"
+echo "  gpu_mem=128, arm_boost=1 (ignored on Pi Zero; harmless), disable_overscan=1, dwc2, vc4-kms-v3d"
+if command -v vcgencmd >/dev/null 2>&1; then
+  echo "  $(vcgencmd get_mem gpu 2>/dev/null | tr -d '\r') — after changing gpu_mem, reboot to apply; 128 MB is typical for KMS HDMI on Pi Zero."
+fi
 
 # ---------------------------------------------------------------------------
 # 4. USB gadget Ethernet for commissioning
@@ -231,7 +237,7 @@ add_tmpfs /var/log    16M 0755
 # ---------------------------------------------------------------------------
 log "7/12  Disabling unnecessary services"
 
-for svc in bluetooth.service triggerhappy.service; do
+for svc in bluetooth.service triggerhappy.service ModemManager.service; do
   if systemctl is-enabled "$svc" 2>/dev/null | grep -q enabled; then
     sudo systemctl disable --now "$svc" 2>/dev/null || true
     echo "  disabled $svc"
@@ -251,6 +257,22 @@ systemctl --user start  pipewire pipewire-pulse wireplumber 2>/dev/null || true
 # Enable linger so user services start at boot without a TTY login
 sudo loginctl enable-linger "$(id -un)" 2>/dev/null || true
 echo "  pipewire enabled, linger enabled for $(id -un)"
+
+# Larger PulseAudio-compatible buffers (reduces underruns on slow CPUs; trades latency).
+PW_DROPIN="/etc/pipewire/pipewire-pulse.conf.d/99-arrival-board-latency.conf"
+if [ ! -f "$PW_DROPIN" ]; then
+  sudo mkdir -p "$(dirname "$PW_DROPIN")"
+  sudo tee "$PW_DROPIN" >/dev/null <<'PWCONF'
+pulse.properties = {
+    pulse.min.req          = 512/48000
+    pulse.default.req      = 1152/48000
+    pulse.min.frag         = 512/48000
+    pulse.default.frag     = 4096/48000
+}
+PWCONF
+  echo "  pipewire-pulse latency drop-in installed ($PW_DROPIN)"
+fi
+systemctl --user restart pipewire pipewire-pulse wireplumber 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # 9. Create arrival_board.env
@@ -278,8 +300,15 @@ fi
 log "10/12  Building Arrival Board"
 cd "$PROJECT_DIR"
 make clean
-make -j2
-echo "  binary: $PROJECT_DIR/arrival_board"
+# Pi Zero (512 MB, 1 core): parallel compile can OOM; use -j2 only with enough RAM and cores.
+MAKE_JOBS=1
+NPROC="$(nproc 2>/dev/null || echo 1)"
+MEM_KB="$(awk '/MemTotal:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)"
+if [ "${NPROC:-1}" -ge 2 ] && [ "${MEM_KB:-0}" -ge 900000 ]; then
+  MAKE_JOBS=2
+fi
+make -j"${MAKE_JOBS}"
+echo "  binary: $PROJECT_DIR/arrival_board (make -j${MAKE_JOBS})"
 
 # ---------------------------------------------------------------------------
 # 11. Auto-start on boot (systemd user service)
@@ -297,7 +326,9 @@ $(id -un) ALL=(root) NOPASSWD: ${PROJECT_DIR}/tools/config_network.sh *
 EOF
 sudo chmod 0440 "$SUDOERS_FILE"
 sudo visudo -cf "$SUDOERS_FILE" >/dev/null
-chmod +x "$PROJECT_DIR/tools/config_mode.sh" "$PROJECT_DIR/tools/config_network.sh" "$PROJECT_DIR/tools/config_portal/portal.py" 2>/dev/null || true
+chmod +x "$PROJECT_DIR/tools/config_mode.sh" "$PROJECT_DIR/tools/config_network.sh" \
+         "$PROJECT_DIR/tools/verify_aplay_device.sh" \
+         "$PROJECT_DIR/tools/config_portal/portal.py" 2>/dev/null || true
 echo "  config-mode sudo helper installed"
 
 # ---------------------------------------------------------------------------
@@ -311,11 +342,12 @@ cat <<'EOF'
     - Build deps, SDL2, fonts, PipeWire, zram, SSH, Avahi installed
     - GPIO, hotspot, and WiFi setup dependencies installed
     - USB gadget Ethernet enabled for direct USB commissioning
-    - gpu_mem=128, arm_boost=1, dwc2, vc4-kms-v3d confirmed
+    - gpu_mem=128, arm_boost=1 (Pi 4-class; ignored on Pi Zero), dwc2, vc4-kms-v3d confirmed
     - CPU governor set to performance
     - Disk swap disabled, zram enabled, tmpfs for /tmp and /var/log
-    - bluetooth + triggerhappy disabled (avahi kept for .local SSH)
-    - PipeWire user services enabled with linger
+    - bluetooth + triggerhappy + ModemManager disabled (avahi kept for .local SSH)
+    - PipeWire user services enabled with linger; pulse buffer drop-in for kiosk audio
+    - gpu_mem verified with vcgencmd when available (reboot after first config change)
     - arrival_board.env created (if new)
     - Project built (make; SDL2_image required)
     - arrival-board.service enabled for auto-start

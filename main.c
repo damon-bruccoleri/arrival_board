@@ -212,7 +212,7 @@ static void build_health_message(const AppConfig *cfg, int wifi_ok, int stop_kno
 static void on_flip_ended(void *userdata) {
     FlipSoundCtx *ctx = (FlipSoundCtx *)userdata;
     if (!ctx || !ctx->flip_path || !ctx->flip_path[0]) return;
-    if (getenv("AUDIO_DEBUG"))
+    if (audio_debug_enabled())
         fprintf(stderr, "AUDIO_DEBUG: flip ended, playing sound\n");
     if (ctx->aplay_device && ctx->aplay_device[0]) {
         audio_stop_music();
@@ -346,8 +346,6 @@ int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
 
-    if (!getenv("AUDIO_DEBUG")) setenv("AUDIO_DEBUG", "1", 0);
-
     AppConfig cfg;
     config_from_env(&cfg);
     char local_health[768] = {0};
@@ -371,7 +369,15 @@ int main(int argc, char **argv) {
     if ((IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG) == 0)
         logf_("IMG_Init PNG failed: %s", IMG_GetError());
 
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+    /* Nearest scaling saves VC4 fill-rate; set SDL_RENDER_SCALE_QUALITY=linear to restore. */
+    {
+        const char *sq = getenv("SDL_RENDER_SCALE_QUALITY");
+        if (sq && (strcmp(sq, "linear") == 0 || strcmp(sq, "1") == 0))
+            SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "linear");
+        else
+            SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+    }
+    SDL_SetHint("SDL_RENDER_BATCHING", "1");
 
     res.win = SDL_CreateWindow("Arrival Board",
                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -421,7 +427,7 @@ int main(int argc, char **argv) {
         return fatal_font_error(&res, "emoji font failed to load",
                                 cfg.emoji_font_path, "EMOJI_FONT_PATH", "fonts-noto-color-emoji");
 
-    if (getenv("AUDIO_DEBUG")) {
+    if (audio_debug_enabled()) {
         fprintf(stderr, "AUDIO_DEBUG: music=%s\n", cfg.music_path[0] ? cfg.music_path : "(none)");
         fprintf(stderr, "AUDIO_DEBUG: music_loop2=%s\n", cfg.music_loop2_path[0] ? cfg.music_loop2_path : "(none)");
         fprintf(stderr, "AUDIO_DEBUG: flip=%s\n", cfg.flip_path[0] ? cfg.flip_path : "(none)");
@@ -431,7 +437,7 @@ int main(int argc, char **argv) {
         audio_start_music(cfg.music_path,
                           cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
                           cfg.aplay_device[0] ? cfg.aplay_device : NULL);
-    else if (getenv("AUDIO_DEBUG"))
+    else if (audio_debug_enabled())
         fprintf(stderr, "AUDIO_DEBUG: music file not found, skipping audio\n");
 
     /* Draw one immediate frame so the display is not blank while the fetch
@@ -498,7 +504,9 @@ int main(int argc, char **argv) {
     int config_ap_client_connected = 0;
 
     /* ---- Main render loop ------------------------------------------------ */
+    enum { FRAME_BUDGET_MS = 16 };
     for (;;) {
+        Uint32 frame_start = SDL_GetTicks();
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) goto done;
@@ -566,7 +574,11 @@ int main(int argc, char **argv) {
             if (strstr(config_status, "Applying") || strstr(config_status, "Reboot"))
                 app_mode = APP_CONFIG_APPLYING;
             ui_render_config(r, &res.fonts, W, H, config_status);
-            SDL_Delay(16);
+            {
+                Uint32 elapsed = SDL_GetTicks() - frame_start;
+                if (elapsed < FRAME_BUDGET_MS)
+                    SDL_Delay(FRAME_BUDGET_MS - elapsed);
+            }
             continue;
         }
 
@@ -621,7 +633,11 @@ int main(int argc, char **argv) {
                   cfg.flip_path[0] ? (void *)&flip_ctx : NULL,
                   local_health);
 
-        SDL_Delay(16);
+        {
+            Uint32 elapsed = SDL_GetTicks() - frame_start;
+            if (elapsed < FRAME_BUDGET_MS)
+                SDL_Delay(FRAME_BUDGET_MS - elapsed);
+        }
     }
 
 done:

@@ -4,6 +4,9 @@
  */
 #pragma once
 
+/* True only when AUDIO_DEBUG=1 (off in production by default). */
+int audio_debug_enabled(void);
+
 /* Return WAV duration in seconds (from file header), or -1 on error. */
 int audio_wav_duration_seconds(const char *path);
 
