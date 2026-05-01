@@ -1,306 +1,341 @@
 /*
- * Audio: background music and flip via PipeWire/PulseAudio (paplay) or ALSA (aplay).
- * When aplay_device is NULL, use paplay so music and flip mix. Otherwise use aplay to raw device.
+ * Audio: in-process SDL2 mixer.
  *
- * For PCM WAVs already at 16-bit LE, 44.1 kHz or 48 kHz, mono or stereo, paplay/aplay is used
- * directly (no sox) unless AUDIO_FORCE_SOX=1. sox is only for gain/volume or odd formats.
+ * Implementation notes:
+ * - A single SDL audio device is opened once; the callback mixes music + ferry + flip.
+ * - Assets are loaded once at startup and converted to the device format.
+ * - Flip triggers are non-blocking and ignore re-triggers while a flip is active.
  */
 #include "audio.h"
-#include <errno.h>
-#include <signal.h>
+#include <SDL2/SDL.h>
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
-static pid_t music_pid = -1;
-static pid_t ferry_pid = -1;
+typedef struct {
+    SDL_AudioDeviceID dev;
+    SDL_AudioSpec have;
+    int initialized;
+    int paused;
+
+    /* Pre-converted interleaved S16 samples in device format. */
+    Uint8 *music_buf;
+    uint32_t music_bytes;
+    uint32_t music_pos_frames;     /* position within cycle */
+    uint32_t music_cycle_frames;   /* cycle length (music+gap) */
+    uint32_t music_file_frames;    /* frames in file */
+    uint32_t music_cycles;         /* completed cycles */
+
+    Uint8 *ferry_buf;
+    uint32_t ferry_bytes;
+    uint32_t ferry_pos_frames;
+    int ferry_active;
+
+    Uint8 *flip_buf;
+    uint32_t flip_bytes;
+    uint32_t flip_pos_frames;
+    int flip_active;
+} AudioState;
+
+static AudioState g_audio;
 
 int audio_debug_enabled(void) {
     const char *e = getenv("AUDIO_DEBUG");
     return e && strcmp(e, "1") == 0;
 }
 
-static int audio_force_sox(void) {
-    const char *e = getenv("AUDIO_FORCE_SOX");
-    return e && strcmp(e, "1") == 0;
+static uint32_t bytes_per_frame(const SDL_AudioSpec *s) {
+    if (!s) return 0;
+    return (uint32_t)(SDL_AUDIO_BITSIZE(s->format) / 8u) * (uint32_t)s->channels;
 }
 
-/* Read fmt chunk: PCM (1), 16-bit LE, 44.1k or 48k, 1–2 channels — fine for paplay/aplay without sox. */
-static int wav_ok_direct_play(const char *path) {
-    if (!path || !path[0]) return 0;
-    FILE *f = fopen(path, "rb");
-    if (!f) return 0;
-    unsigned char buf[12];
-    uint32_t riff_size = 0;
-    long pos;
-    if (fread(buf, 1, 12, f) != 12) goto bad;
-    if (memcmp(buf, "RIFF", 4) != 0 || memcmp(buf + 8, "WAVE", 4) != 0) goto bad;
-    riff_size = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) | ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
-    pos = 12;
-    while (1) {
-        if (fseek(f, pos, SEEK_SET) != 0) goto bad;
-        if (fread(buf, 1, 8, f) != 8) goto bad;
-        uint32_t chunk_size = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) | ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
-        if (memcmp(buf, "fmt ", 4) == 0 && chunk_size >= 16) {
-            unsigned char fmt[16];
-            if (fread(fmt, 1, 16, f) != 16) goto bad;
-            uint16_t audio_format = (uint16_t)fmt[0] | ((uint16_t)fmt[1] << 8);
-            uint16_t channels = (uint16_t)fmt[2] | ((uint16_t)fmt[3] << 8);
-            uint32_t rate = (uint32_t)fmt[4] | ((uint32_t)fmt[5] << 8) | ((uint32_t)fmt[6] << 16) | ((uint32_t)fmt[7] << 24);
-            uint16_t bits = (uint16_t)fmt[14] | ((uint16_t)fmt[15] << 8);
-            fclose(f);
-            if (audio_format != 1u) return 0;
-            if (bits != 16u) return 0;
-            if (channels != 1u && channels != 2u) return 0;
-            if (rate != 44100u && rate != 48000u) return 0;
-            return 1;
-        }
-        if (memcmp(buf, "data", 4) == 0)
-            break;
-        pos += 8 + (long)((chunk_size + 1u) / 2u * 2u);
-        if (pos < 12 || (riff_size > 0 && (uint32_t)pos > riff_size + 8)) goto bad;
+static void free_buf(Uint8 **p) {
+    if (p && *p) {
+        SDL_free(*p);
+        *p = NULL;
     }
-bad:
-    fclose(f);
+}
+
+static int parse_env_int(const char *k, int defv, int lo, int hi) {
+    const char *v = getenv(k);
+    int out = (v && *v) ? atoi(v) : defv;
+    if (out < lo) out = lo;
+    if (out > hi) out = hi;
+    return out;
+}
+
+static int load_and_convert(const char *path, const SDL_AudioSpec *dst,
+                            Uint8 **out_buf, uint32_t *out_bytes) {
+    if (!out_buf || !out_bytes) return -1;
+    *out_buf = NULL;
+    *out_bytes = 0;
+    if (!path || !path[0]) return 0;
+
+    SDL_AudioSpec src;
+    Uint8 *src_buf = NULL;
+    Uint32 src_len = 0;
+    if (!SDL_LoadWAV(path, &src, &src_buf, &src_len)) {
+        if (audio_debug_enabled())
+            fprintf(stderr, "AUDIO_DEBUG: SDL_LoadWAV failed path=%s err=%s\n", path, SDL_GetError());
+        return -1;
+    }
+
+    /* Convert via SDL_AudioStream to match the device format exactly. */
+    SDL_AudioStream *st = SDL_NewAudioStream(src.format, src.channels, src.freq,
+                                             dst->format, dst->channels, dst->freq);
+    if (!st) {
+        SDL_FreeWAV(src_buf);
+        return -1;
+    }
+    if (SDL_AudioStreamPut(st, src_buf, (int)src_len) < 0) {
+        SDL_FreeWAV(src_buf);
+        SDL_FreeAudioStream(st);
+        return -1;
+    }
+    SDL_FreeWAV(src_buf);
+    SDL_AudioStreamFlush(st);
+
+    int avail = SDL_AudioStreamAvailable(st);
+    if (avail <= 0) {
+        SDL_FreeAudioStream(st);
+        return 0;
+    }
+    Uint8 *buf = (Uint8 *)SDL_malloc((size_t)avail);
+    if (!buf) {
+        SDL_FreeAudioStream(st);
+        return -1;
+    }
+    int got = SDL_AudioStreamGet(st, buf, avail);
+    SDL_FreeAudioStream(st);
+    if (got <= 0) {
+        SDL_free(buf);
+        return -1;
+    }
+
+    *out_buf = buf;
+    *out_bytes = (uint32_t)got;
     return 0;
 }
 
-/* Parse RIFF WAV and return duration in seconds; -1 on error. */
-int audio_wav_duration_seconds(const char *path) {
-    if (!path || !path[0]) return -1;
-    FILE *f = fopen(path, "rb");
-    if (!f) return -1;
-    unsigned char buf[12];
-    uint32_t rate = 0;
-    uint16_t channels = 0;
-    uint16_t bits = 0;
-    uint32_t data_bytes = 0;
-    uint32_t riff_size = 0;
-    long pos;
-    if (fread(buf, 1, 12, f) != 12) goto fail;
-    if (memcmp(buf, "RIFF", 4) != 0 || memcmp(buf + 8, "WAVE", 4) != 0) goto fail;
-    riff_size = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) | ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
-    pos = 12;
-    while (1) {
-        if (fseek(f, pos, SEEK_SET) != 0) goto fail;
-        if (fread(buf, 1, 8, f) != 8) goto fail;
-        {
-            uint32_t chunk_size = (uint32_t)buf[4] | ((uint32_t)buf[5] << 8) | ((uint32_t)buf[6] << 16) | ((uint32_t)buf[7] << 24);
-            if (memcmp(buf, "fmt ", 4) == 0 && chunk_size >= 16) {
-                unsigned char fmt[16];
-                if (fread(fmt, 1, 16, f) != 16) goto fail;
-                channels = (uint16_t)fmt[2] | ((uint16_t)fmt[3] << 8);
-                rate = (uint32_t)fmt[4] | ((uint32_t)fmt[5] << 8) | ((uint32_t)fmt[6] << 16) | ((uint32_t)fmt[7] << 24);
-                bits = (uint16_t)fmt[14] | ((uint16_t)fmt[15] << 8);
-            } else if (memcmp(buf, "data", 4) == 0) {
-                data_bytes = chunk_size;
-                if (data_bytes == 0 && riff_size > (uint32_t)pos)
-                    data_bytes = riff_size - (uint32_t)pos;
-                break;
-            }
-            pos += 8 + (chunk_size + 1) / 2 * 2;
-        }
-    }
-    fclose(f);
-    if (rate == 0 || channels == 0 || bits == 0) return -1;
-    return (int)(data_bytes / (rate * channels * (bits / 8)));
-fail:
-    fclose(f);
-    return -1;
+static int16_t clamp_s16(int32_t v) {
+    if (v > 32767) return 32767;
+    if (v < -32768) return -32768;
+    return (int16_t)v;
 }
 
-void audio_play_flip(const char *flip_path, const char *aplay_device) {
-    if (!flip_path || !flip_path[0]) return;
-
-    while (waitpid(-1, NULL, WNOHANG) > 0) {}
-
-    int audio_debug = audio_debug_enabled();
-    int direct = !audio_force_sox() && wav_ok_direct_play(flip_path);
-    if (audio_debug) {
-        fprintf(stderr, "AUDIO_DEBUG: audio_play_flip path=%s device=%s direct=%d\n",
-                flip_path, aplay_device && aplay_device[0] ? aplay_device : "(paplay)", direct);
-    }
-
-    if (!aplay_device || !aplay_device[0]) {
-        pid_t pid = fork();
-        if (pid < 0) return;
-        if (pid == 0) {
-            (void)freopen("/dev/null", "r", stdin);
-            (void)freopen("/dev/null", "w", stdout);
-            if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
-            if (direct) {
-                (void)execlp("paplay", "paplay", flip_path, (char *)NULL);
-                _exit(127);
-            }
-            execl("/bin/sh", "sh", "-c",
-                  "command -v paplay >/dev/null 2>&1 && ( command -v sox >/dev/null 2>&1 && sox -q -v 5.0 \"$1\" -t wav - 2>/dev/null | paplay 2>/dev/null ) || paplay \"$1\" 2>/dev/null",
-                  "sh", flip_path, (char *)NULL);
-            _exit(127);
+static void mix_from_buf_s16(int32_t *acc, int frames, int channels,
+                             const Uint8 *buf, uint32_t buf_frames,
+                             uint32_t pos_frames, float gain) {
+    if (!acc || frames <= 0 || channels <= 0 || !buf || buf_frames == 0)
+        return;
+    const int16_t *src = (const int16_t *)buf;
+    for (int i = 0; i < frames; i++) {
+        uint32_t si = pos_frames + (uint32_t)i;
+        if (si >= buf_frames) break;
+        const int16_t *sp = src + (size_t)si * (size_t)channels;
+        int32_t *dp = acc + (size_t)i * (size_t)channels;
+        for (int c = 0; c < channels; c++) {
+            dp[c] += (int32_t)((float)sp[c] * gain);
         }
+    }
+}
+
+static void audio_callback(void *userdata, Uint8 *stream, int len) {
+    (void)userdata;
+    if (!stream || len <= 0) return;
+
+    if (!g_audio.initialized || g_audio.paused ||
+        g_audio.have.format != AUDIO_S16SYS ||
+        (g_audio.have.channels != 1 && g_audio.have.channels != 2)) {
+        memset(stream, 0, (size_t)len);
         return;
     }
 
-    if (audio_debug) fprintf(stderr, "AUDIO_DEBUG: flip via aplay (ALSA)\n");
-    pid_t pid = fork();
-    if (pid < 0) return;
-    if (pid == 0) {
-        (void)freopen("/dev/null", "r", stdin);
-        (void)freopen("/dev/null", "w", stdout);
-        if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
-        if (direct) {
-            if (execlp("aplay", "aplay", "-q", "-D", aplay_device, flip_path, (char *)NULL) < 0)
-                _exit(127);
-            _exit(0);
-        }
-        if (audio_debug) {
-            if (execl("/bin/sh", "sh", "-c",
-                      "( command -v sox >/dev/null 2>&1 && sox -q -v 5.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - ) || aplay -q -D \"$2\" \"$1\"",
-                      "sh", flip_path, aplay_device, (char *)NULL) < 0)
-                _exit(127);
-        } else if (execl("/bin/sh", "sh", "-c",
-                  "( command -v sox >/dev/null 2>&1 && sox -q -v 5.0 \"$1\" -c 2 -r 44100 -t wav - | aplay -q -D \"$2\" -f S16_LE -c 2 -r 44100 - 2>/dev/null ) || aplay -q -D \"$2\" \"$1\" 2>/dev/null",
-                  "sh", flip_path, aplay_device, (char *)NULL) < 0)
-            _exit(127);
-        _exit(0);
+    const int channels = g_audio.have.channels;
+    const int frames = (int)((uint32_t)len / bytes_per_frame(&g_audio.have));
+    if (frames <= 0) {
+        memset(stream, 0, (size_t)len);
+        return;
     }
-    while (waitpid(pid, NULL, 0) < 0 && errno == EINTR) { }
-}
 
-void audio_start_music(const char *music_path, const char *music_loop2, const char *aplay_device) {
-    if (!music_path || !music_path[0]) return;
-
-    int audio_debug = audio_debug_enabled();
-    int use_pulse = (!aplay_device || !aplay_device[0]);
-    int music_direct = !audio_force_sox() && wav_ok_direct_play(music_path);
-    int ferry_direct = (!music_loop2 || !music_loop2[0]) ? 0 : (!audio_force_sox() && wav_ok_direct_play(music_loop2));
-    ferry_pid = -1;
-
-    int music_sec = 23;
-    const char *env_music = getenv("MUSIC_DURATION_SEC");
-    if (env_music && *env_music) {
-        int v = atoi(env_music);
-        if (v > 0) music_sec = v;
+    int32_t *acc = (int32_t *)SDL_calloc((size_t)frames * (size_t)channels, sizeof(int32_t));
+    if (!acc) {
+        memset(stream, 0, (size_t)len);
+        return;
     }
-    int delay_sec = music_sec * 4;
-    int interval_sec = music_sec * 5;
 
-    int file_sec = audio_wav_duration_seconds(music_path);
-    if (file_sec <= 0 || file_sec > 300) {
-        const char *env_file = getenv("MUSIC_FILE_SEC");
-        if (env_file && *env_file) { int v = atoi(env_file); if (v > 0) file_sec = v; }
-        else file_sec = 21;
-    }
-    int gap_sec = music_sec - file_sec;
-    if (gap_sec < 0) gap_sec = 0;
+    /* --- Music (loop with optional gap) --- */
+    if (g_audio.music_buf && g_audio.music_bytes > 0 && g_audio.music_cycle_frames > 0) {
+        uint32_t cycle_pos = g_audio.music_pos_frames;
+        uint32_t file_frames = g_audio.music_file_frames;
+        uint32_t cycle_frames = g_audio.music_cycle_frames;
 
-    if (music_loop2 && music_loop2[0]) {
-        char delay_buf[16], interval_buf[16];
-        snprintf(delay_buf, sizeof(delay_buf), "%d", delay_sec);
-        snprintf(interval_buf, sizeof(interval_buf), "%d", interval_sec);
-        ferry_pid = fork();
-        if (ferry_pid == 0) {
-            setsid();
-            (void)freopen("/dev/null", "r", stdin);
-            (void)freopen("/dev/null", "w", stdout);
-            if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
-            if (use_pulse) {
-                if (ferry_direct) {
-                    execl("/bin/sh", "sh", "-c",
-                          "command -v paplay >/dev/null 2>&1 && sleep \"$1\" && while true; do paplay \"$2\"; sleep \"$3\"; done",
-                          "sh", delay_buf, music_loop2, interval_buf, (char *)NULL);
-                } else {
-                    execl("/bin/sh", "sh", "-c",
-                          "command -v paplay >/dev/null 2>&1 && sleep \"$1\" && while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$2\" -t wav - 2>/dev/null | paplay 2>/dev/null ) || paplay \"$2\" 2>/dev/null; sleep \"$3\"; done",
-                          "sh", delay_buf, music_loop2, interval_buf, (char *)NULL);
-                }
-            } else {
-                if (ferry_direct) {
-                    execl("/bin/sh", "sh", "-c",
-                          "sleep \"$1\" && while true; do aplay -q -D \"$2\" \"$3\"; sleep \"$4\"; done",
-                          "sh", delay_buf, aplay_device, music_loop2, interval_buf, (char *)NULL);
-                } else {
-                    execl("/bin/sh", "sh", "-c",
-                          "sleep \"$1\" && while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$3\" -t wav - 2>/dev/null | aplay -q -D \"$2\" - 2>/dev/null ) || aplay -q -D \"$2\" \"$3\" 2>/dev/null; sleep \"$4\"; done",
-                          "sh", delay_buf, aplay_device, music_loop2, interval_buf, (char *)NULL);
+        for (int i = 0; i < frames; i++) {
+            /* At the start of a new cycle, schedule ferry overlay (every 5 loops, first at loop 4). */
+            if (cycle_pos == 0 && i == 0) {
+                /* nothing: handled on wrap below to count completed cycle */
+            }
+
+            if (cycle_pos < file_frames) {
+                mix_from_buf_s16(acc + (size_t)i * (size_t)channels, 1, channels,
+                                 g_audio.music_buf, file_frames, cycle_pos, 0.50f);
+            }
+            cycle_pos++;
+            if (cycle_pos >= cycle_frames) {
+                cycle_pos = 0;
+                g_audio.music_cycles++;
+                /* Overlay ferry every 5 cycles, first time after 4 cycles. */
+                if (g_audio.ferry_buf && g_audio.ferry_bytes > 0) {
+                    if (g_audio.music_cycles == 4 || (g_audio.music_cycles > 4 && ((g_audio.music_cycles - 4) % 5) == 0)) {
+                        g_audio.ferry_active = 1;
+                        g_audio.ferry_pos_frames = 0;
+                    }
                 }
             }
-            _exit(127);
         }
-        if (ferry_pid < 0) ferry_pid = -1;
-        else if (audio_debug)
-            fprintf(stderr, "AUDIO_DEBUG: ferry overlay every 5 loops (first at %ds, then every %ds)\n", delay_sec, interval_sec);
+        g_audio.music_pos_frames = cycle_pos;
     }
 
-    char gap_buf[16];
-    snprintf(gap_buf, sizeof(gap_buf), "%d", gap_sec);
-    if (audio_debug)
-        fprintf(stderr, "AUDIO_DEBUG: cycle=%ds file~%ds gap=%ds music_direct=%d\n", music_sec, file_sec, gap_sec, music_direct);
-
-    pid_t pid = fork();
-    if (pid < 0) return;
-    if (pid == 0) {
-        setsid();
-        (void)freopen("/dev/null", "r", stdin);
-        (void)freopen("/dev/null", "w", stdout);
-        if (!audio_debug) (void)freopen("/dev/null", "w", stderr);
-        if (use_pulse) {
-            if (music_direct) {
-                if (audio_debug)
-                    execl("/bin/sh", "sh", "-c",
-                          "command -v paplay >/dev/null 2>&1 && while true; do paplay \"$1\"; sleep \"$2\"; done",
-                          "sh", music_path, gap_buf, (char *)NULL);
-                else
-                    execl("/bin/sh", "sh", "-c",
-                          "command -v paplay >/dev/null 2>&1 && while true; do paplay \"$1\" 2>/dev/null; sleep \"$2\"; done",
-                          "sh", music_path, gap_buf, (char *)NULL);
-            } else {
-                if (audio_debug)
-                    execl("/bin/sh", "sh", "-c",
-                          "command -v paplay >/dev/null 2>&1 && while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$1\" -t wav - | paplay ) || paplay \"$1\"; sleep \"$2\"; done",
-                          "sh", music_path, gap_buf, (char *)NULL);
-                else
-                    execl("/bin/sh", "sh", "-c",
-                          "command -v paplay >/dev/null 2>&1 && while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$1\" -t wav - 2>/dev/null | paplay 2>/dev/null ) || paplay \"$1\" 2>/dev/null; sleep \"$2\"; done",
-                          "sh", music_path, gap_buf, (char *)NULL);
-            }
-        } else {
-            if (music_direct) {
-                if (audio_debug)
-                    execl("/bin/sh", "sh", "-c",
-                          "while true; do aplay -q -D \"$1\" \"$2\"; sleep \"$3\"; done",
-                          "sh", aplay_device, music_path, gap_buf, (char *)NULL);
-                else
-                    execl("/bin/sh", "sh", "-c",
-                          "while true; do aplay -q -D \"$1\" \"$2\" 2>/dev/null; sleep \"$3\"; done",
-                          "sh", aplay_device, music_path, gap_buf, (char *)NULL);
-            } else {
-                if (audio_debug)
-                    execl("/bin/sh", "sh", "-c",
-                          "while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$2\" -t wav - | aplay -q -D \"$1\" - ) || aplay -q -D \"$1\" \"$2\"; sleep \"$3\"; done",
-                          "sh", aplay_device, music_path, gap_buf, (char *)NULL);
-                else
-                    execl("/bin/sh", "sh", "-c",
-                          "while true; do ( command -v sox >/dev/null 2>&1 && sox -q -v 0.5 \"$2\" -t wav - 2>/dev/null | aplay -q -D \"$1\" - 2>/dev/null ) || aplay -q -D \"$1\" \"$2\" 2>/dev/null; sleep \"$3\"; done",
-                          "sh", aplay_device, music_path, gap_buf, (char *)NULL);
-            }
+    /* --- Ferry overlay (optional) --- */
+    if (g_audio.ferry_active && g_audio.ferry_buf && g_audio.ferry_bytes > 0) {
+        uint32_t ferry_frames = g_audio.ferry_bytes / bytes_per_frame(&g_audio.have);
+        mix_from_buf_s16(acc, frames, channels, g_audio.ferry_buf, ferry_frames, g_audio.ferry_pos_frames, 0.35f);
+        g_audio.ferry_pos_frames += (uint32_t)frames;
+        if (g_audio.ferry_pos_frames >= ferry_frames) {
+            g_audio.ferry_active = 0;
+            g_audio.ferry_pos_frames = 0;
         }
-        _exit(127);
     }
-    music_pid = pid;
+
+    /* --- Flip (one at a time; ignore retriggers while active) --- */
+    if (g_audio.flip_active && g_audio.flip_buf && g_audio.flip_bytes > 0) {
+        uint32_t flip_frames = g_audio.flip_bytes / bytes_per_frame(&g_audio.have);
+        mix_from_buf_s16(acc, frames, channels, g_audio.flip_buf, flip_frames, g_audio.flip_pos_frames, 1.0f);
+        g_audio.flip_pos_frames += (uint32_t)frames;
+        if (g_audio.flip_pos_frames >= flip_frames) {
+            g_audio.flip_active = 0;
+            g_audio.flip_pos_frames = 0;
+        }
+    }
+
+    /* Write out */
+    int16_t *out = (int16_t *)stream;
+    for (int i = 0; i < frames * channels; i++)
+        out[i] = clamp_s16(acc[i]);
+    SDL_free(acc);
 }
 
-void audio_stop_music(void) {
-    if (ferry_pid > 0) {
-        kill(ferry_pid, SIGTERM);
-        waitpid(ferry_pid, NULL, WNOHANG);
-        ferry_pid = -1;
+int audio_init(const char *music_path, const char *ferry_path, const char *flip_path) {
+    if (g_audio.initialized)
+        return 0;
+
+    if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+        if (audio_debug_enabled())
+            fprintf(stderr, "AUDIO_DEBUG: SDL_INIT_AUDIO failed: %s\n", SDL_GetError());
+        return -1;
     }
-    if (music_pid > 0) {
-        kill(music_pid, SIGTERM);
-        waitpid(music_pid, NULL, WNOHANG);
-        music_pid = -1;
+
+    SDL_AudioSpec want;
+    SDL_zero(want);
+    want.freq = 44100;
+    want.format = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples = 1024;
+    want.callback = audio_callback;
+    want.userdata = NULL;
+
+    SDL_AudioSpec have;
+    SDL_zero(have);
+    SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 0, &want, &have,
+                                                SDL_AUDIO_ALLOW_FREQUENCY_CHANGE |
+                                                SDL_AUDIO_ALLOW_CHANNELS_CHANGE);
+    if (!dev) {
+        if (audio_debug_enabled())
+            fprintf(stderr, "AUDIO_DEBUG: SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+        return -1;
     }
+
+    memset(&g_audio, 0, sizeof(g_audio));
+    g_audio.dev = dev;
+    g_audio.have = have;
+    g_audio.initialized = 1;
+    g_audio.paused = 0;
+
+    /* Convert/preload assets */
+    (void)load_and_convert(flip_path, &g_audio.have, &g_audio.flip_buf, &g_audio.flip_bytes);
+    (void)load_and_convert(music_path, &g_audio.have, &g_audio.music_buf, &g_audio.music_bytes);
+    (void)load_and_convert(ferry_path, &g_audio.have, &g_audio.ferry_buf, &g_audio.ferry_bytes);
+
+    /* Configure looping music cycle/gap */
+    uint32_t bpf = bytes_per_frame(&g_audio.have);
+    if (g_audio.music_buf && g_audio.music_bytes > 0 && bpf > 0) {
+        g_audio.music_file_frames = g_audio.music_bytes / bpf;
+        int music_sec = parse_env_int("MUSIC_DURATION_SEC", 23, 1, 600);
+        uint32_t cycle_frames = (uint32_t)music_sec * (uint32_t)g_audio.have.freq;
+        if (cycle_frames < g_audio.music_file_frames)
+            cycle_frames = g_audio.music_file_frames;
+        g_audio.music_cycle_frames = cycle_frames;
+    }
+
+    if (audio_debug_enabled()) {
+        fprintf(stderr, "AUDIO_DEBUG: device freq=%d ch=%d fmt=0x%x samples=%d\n",
+                g_audio.have.freq, g_audio.have.channels, g_audio.have.format, g_audio.have.samples);
+        fprintf(stderr, "AUDIO_DEBUG: music=%s bytes=%u\n", (music_path && *music_path) ? music_path : "(none)", g_audio.music_bytes);
+        fprintf(stderr, "AUDIO_DEBUG: ferry=%s bytes=%u\n", (ferry_path && *ferry_path) ? ferry_path : "(none)", g_audio.ferry_bytes);
+        fprintf(stderr, "AUDIO_DEBUG: flip=%s bytes=%u\n", (flip_path && *flip_path) ? flip_path : "(none)", g_audio.flip_bytes);
+    }
+
+    SDL_PauseAudioDevice(g_audio.dev, 0);
+    return 0;
+}
+
+void audio_shutdown(void) {
+    if (!g_audio.initialized)
+        return;
+    SDL_LockAudioDevice(g_audio.dev);
+    g_audio.paused = 1;
+    g_audio.flip_active = 0;
+    g_audio.ferry_active = 0;
+    SDL_UnlockAudioDevice(g_audio.dev);
+
+    SDL_PauseAudioDevice(g_audio.dev, 1);
+    SDL_CloseAudioDevice(g_audio.dev);
+
+    free_buf(&g_audio.music_buf);
+    free_buf(&g_audio.ferry_buf);
+    free_buf(&g_audio.flip_buf);
+
+    memset(&g_audio, 0, sizeof(g_audio));
+}
+
+void audio_set_paused(int paused) {
+    if (!g_audio.initialized)
+        return;
+    SDL_LockAudioDevice(g_audio.dev);
+    g_audio.paused = paused ? 1 : 0;
+    SDL_UnlockAudioDevice(g_audio.dev);
+}
+
+void audio_trigger_flip(void) {
+    if (!g_audio.initialized || !g_audio.flip_buf || g_audio.flip_bytes == 0)
+        return;
+    SDL_LockAudioDevice(g_audio.dev);
+    if (!g_audio.flip_active) {
+        g_audio.flip_active = 1;
+        g_audio.flip_pos_frames = 0;
+    }
+    SDL_UnlockAudioDevice(g_audio.dev);
+}
+
+void audio_trigger_ferry(void) {
+    if (!g_audio.initialized || !g_audio.ferry_buf || g_audio.ferry_bytes == 0)
+        return;
+    SDL_LockAudioDevice(g_audio.dev);
+    if (!g_audio.ferry_active) {
+        g_audio.ferry_active = 1;
+        g_audio.ferry_pos_frames = 0;
+    }
+    SDL_UnlockAudioDevice(g_audio.dev);
 }

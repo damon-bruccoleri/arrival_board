@@ -1,21 +1,27 @@
 /*
- * Audio: PipeWire/PulseAudio via paplay, or ALSA via aplay when APLAY_DEVICE is set.
- * When aplay_device is NULL, uses paplay so music and flip mix. Otherwise aplay to raw device.
+ * Audio: in-process SDL2 mixer.
+ *
+ * Rationale:
+ * - Avoid fork/exec of paplay/aplay/sox per flip (high jitter on Pi Zero / Zero W).
+ * - Keep audio work off the render loop; flip triggers must be non-blocking.
+ * - Mix flip over background music; only one flip plays at a time.
  */
 #pragma once
 
 /* True only when AUDIO_DEBUG=1 (off in production by default). */
 int audio_debug_enabled(void);
 
-/* Return WAV duration in seconds (from file header), or -1 on error. */
-int audio_wav_duration_seconds(const char *path);
+/* Initialize audio device and preload/prepare assets. Safe to call once per process. */
+int audio_init(const char *music_path, const char *ferry_path, const char *flip_path);
 
-/* Start background music (loops). aplay_device NULL = use paplay; else aplay -D aplay_device.
- * Ferry (music_loop2) on Pulse: mixed in at end of each loop; on ALSA: played after each loop. */
-void audio_start_music(const char *music_path, const char *music_loop2, const char *aplay_device);
+/* Stop playback and release SDL audio resources (safe to call even if not initialized). */
+void audio_shutdown(void);
 
-/* Stop background music. */
-void audio_stop_music(void);
+/* Pause/unpause all audio output (0=play, 1=pause). Non-blocking. */
+void audio_set_paused(int paused);
 
-/* Play flip. With NULL device uses Pulse (mixes); with device uses ALSA (caller stops music first). */
-void audio_play_flip(const char *flip_path, const char *aplay_device);
+/* Trigger one flip sound. If a flip is already playing, this call is ignored. */
+void audio_trigger_flip(void);
+
+/* Trigger one ferry/event sound (uses the preloaded ferry asset if present). Ignored if already playing. */
+void audio_trigger_ferry(void);

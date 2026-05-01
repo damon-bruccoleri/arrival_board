@@ -214,16 +214,8 @@ static void on_flip_ended(void *userdata) {
     if (!ctx || !ctx->flip_path || !ctx->flip_path[0]) return;
     if (audio_debug_enabled())
         fprintf(stderr, "AUDIO_DEBUG: flip ended, playing sound\n");
-    if (ctx->aplay_device && ctx->aplay_device[0]) {
-        audio_stop_music();
-        audio_play_flip(ctx->flip_path, ctx->aplay_device);
-        if (ctx->music_path && access(ctx->music_path, R_OK) == 0)
-            audio_start_music(ctx->music_path,
-                              ctx->music_loop2_path && ctx->music_loop2_path[0] ? ctx->music_loop2_path : NULL,
-                              ctx->aplay_device);
-    } else {
-        audio_play_flip(ctx->flip_path, NULL);
-    }
+    (void)ctx;
+    audio_trigger_flip();
 }
 
 /* ---- Background fetch thread ------------------------------------------------
@@ -425,24 +417,17 @@ int main(int argc, char **argv) {
     (void)sym_pt;
     res.symbol_font = NULL;
 
-    int emoji_pt = clampi((int)(58.f * sym_scale) / 2, 12, 120);
+    /* Allow smaller glyph sizes at 720p; min=12 made weather/moon icons too large on Pi Zero 2 W. */
+    int emoji_pt = clampi((int)(58.f * sym_scale) / 2, 8, 120);
     res.emoji_font = TTF_OpenFont(cfg.emoji_font_path, emoji_pt);
     if (!res.emoji_font)
         return fatal_font_error(&res, "emoji font failed to load",
                                 cfg.emoji_font_path, "EMOJI_FONT_PATH", "fonts-noto-color-emoji");
 
-    if (audio_debug_enabled()) {
-        fprintf(stderr, "AUDIO_DEBUG: music=%s\n", cfg.music_path[0] ? cfg.music_path : "(none)");
-        fprintf(stderr, "AUDIO_DEBUG: music_loop2=%s\n", cfg.music_loop2_path[0] ? cfg.music_loop2_path : "(none)");
-        fprintf(stderr, "AUDIO_DEBUG: flip=%s\n", cfg.flip_path[0] ? cfg.flip_path : "(none)");
-        fprintf(stderr, "AUDIO_DEBUG: device=%s\n", cfg.aplay_device[0] ? cfg.aplay_device : "(Pulse)");
-    }
-    if (access(cfg.music_path, R_OK) == 0)
-        audio_start_music(cfg.music_path,
-                          cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
-                          cfg.aplay_device[0] ? cfg.aplay_device : NULL);
-    else if (audio_debug_enabled())
-        fprintf(stderr, "AUDIO_DEBUG: music file not found, skipping audio\n");
+    /* In-process SDL2 audio engine: mixes flip over music; Pi Zero disables music/ferry in config.c. */
+    (void)audio_init(cfg.music_path[0] ? cfg.music_path : NULL,
+                     cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
+                     cfg.flip_path[0] ? cfg.flip_path : NULL);
 
     /* Draw one immediate frame so the display is not blank while the fetch
      * thread performs its initial GTFS download and first MTA poll. */
@@ -521,13 +506,12 @@ int main(int argc, char **argv) {
                 goto done;
         }
 
-        /* Reap zombie child processes (audio fork/exec). */
-        while (waitpid(-1, NULL, WNOHANG) > 0) {}
+        /* No audio subprocesses: keep render loop free of process management. */
 
         if (app_mode == APP_RUNNING && config_mode_poll_pressed(&config_mode)) {
             logf_("CONFIG_MODE entering after GPIO13 press");
             stop_fetch_thread(&fctx, &fetch_started);
-            audio_stop_music();
+            audio_set_paused(1);
             if (config_mode_start_helper(&config_mode) == 0)
                 app_mode = APP_CONFIG_MODE;
             else
@@ -565,10 +549,7 @@ int main(int argc, char **argv) {
             if (exit_config) {
                 config_mode_stop_helper(&config_mode);
                 start_fetch_thread(&fctx, &fetch_started);
-                if (access(cfg.music_path, R_OK) == 0)
-                    audio_start_music(cfg.music_path,
-                                      cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
-                                      cfg.aplay_device[0] ? cfg.aplay_device : NULL);
+                audio_set_paused(0);
                 app_mode = APP_RUNNING;
                 config_unconnected_since = 0;
                 config_ap_checked_at = 0;
@@ -617,7 +598,10 @@ int main(int argc, char **argv) {
 
         if (play_ferry) {
             logf_("Bus left stop: playing ferry sound");
-            audio_play_flip(ferry_path, cfg.aplay_device[0] ? cfg.aplay_device : NULL);
+            if (ferry_path && cfg.music_loop2_path[0])
+                audio_trigger_ferry();
+            else
+                audio_trigger_flip();
         }
 
         SDL_GetRendererOutputSize(r, &W, &H);
@@ -651,7 +635,7 @@ done:
     stop_fetch_thread(&fctx, &fetch_started);
     pthread_mutex_destroy(&fctx.lock);
     config_mode_destroy(&config_mode);
-    audio_stop_music();
+    audio_shutdown();
     resources_destroy(&res);
     return 0;
 }

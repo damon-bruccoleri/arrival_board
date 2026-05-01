@@ -474,6 +474,16 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     text_size(f->h2, ts, &ts_w, &ts_h);
     int time_moon_gap = clampi((int)(10 * scale), 6, 20);
     int first_line_y = hdr.y + pad - hdr_up;
+    /* Emoji glyphs (moon/weather): aggressively shrink at 720p, keep legacy size at 1080p+. */
+    float glyph_scale = 0.50f;
+    if (scale <= 0.36f) {
+        glyph_scale = 0.28f; /* ~720p */
+    } else if (scale < 0.50f) {
+        float t = (scale - 0.36f) / 0.14f; /* 0 at ~720p range, 1 at 1080p */
+        if (t < 0.f) t = 0.f;
+        if (t > 1.f) t = 1.f;
+        glyph_scale = 0.28f + t * (0.50f - 0.28f);
+    }
 
     /* Moon phase glyphs (Noto Color Emoji): U+1F311..U+1F318, UTF-8. */
     static const char moon_phase_utf8[8][5] = {
@@ -486,7 +496,7 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
         int idx = (int)(wx->moon_phase * 8) % 8;
         moon_utf8 = moon_phase_utf8[idx];
         text_size(emoji_font, moon_utf8, &moon_w, NULL);
-        moon_w = (int)(moon_w * 0.5f + 0.5f);  /* layout uses scaled width */
+        moon_w = (int)(moon_w * glyph_scale + 0.5f);  /* layout uses scaled width */
     }
 
     /* First line: date/time then moon glyph, right-justified (moon after time). */
@@ -494,7 +504,7 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
         int time_right_x = right_x - moon_w - time_moon_gap;
         draw_text(r, f->h2, ts, time_right_x, first_line_y, white, 2);
         draw_text_scaled(r, emoji_font, moon_utf8, right_x, first_line_y + px_scaled(scale, REF_HEADER_MOON_DY),
-                         white, 2, 0.5f);
+                         white, 2, glyph_scale);
     } else {
         draw_text(r, f->h2, ts, right_x, first_line_y, white, 2);
     }
@@ -522,14 +532,18 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
         text_size(f->h2, info, &info_w, NULL);
         int icon_w = 0;
         text_size(w_icon_font, wx->icon, &icon_w, NULL);
-        icon_w = (int)(icon_w * 0.5f + 0.5f);
+        icon_w = (int)(icon_w * glyph_scale + 0.5f);
         int gap_icon = clampi((int)(8 * scale), 4, 16);
         int y = hdr.y + pad + ts_h + right_line_gap + weather_line_offset - hdr_up;
 
         int text_left = weather_right_x - info_w;
         int icon_x = text_left - gap_icon - icon_w;
-        draw_text_scaled(r, w_icon_font, wx->icon, icon_x, y + px_scaled(scale, REF_HEADER_WEATHER_ICON_DY),
-                         white, 0, 0.5f);
+        /* 720p-only nudge: keep weather icon fully inside header bounds. */
+        int icon_y = y + px_scaled(scale, REF_HEADER_WEATHER_ICON_DY);
+        if (scale <= 0.36f)
+            icon_y -= px_scaled(scale, 24);
+        draw_text_scaled(r, w_icon_font, wx->icon, icon_x, icon_y,
+                         white, 0, glyph_scale);
         draw_text(r, f->h2, info, weather_right_x, y, white, 2);
     } else {
         draw_text(r, f->h2, "Weather --", weather_right_x,
