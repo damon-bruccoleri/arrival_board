@@ -12,6 +12,41 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+int util_is_pi_zero_v1(void) {
+    static int cached = -1; /* -1 unset, 0 no, 1 yes */
+    if (cached != -1)
+        return cached;
+
+    FILE *f = fopen("/proc/device-tree/model", "rb");
+    if (!f) {
+        cached = 0;
+        return 0;
+    }
+    char buf[256];
+    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    fclose(f);
+    buf[n] = '\0';
+    const char *p = buf;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        p++;
+
+    if (strncmp(p, "Raspberry Pi ", 13) != 0) {
+        cached = 0;
+        return 0;
+    }
+    if (!strstr(p, "Zero")) {
+        cached = 0;
+        return 0;
+    }
+    /* Pi Zero 2 W (BCM2710A1) and any future "Zero 2" keep full video/audio behavior. */
+    if (strstr(p, "Zero 2")) {
+        cached = 0;
+        return 0;
+    }
+    cached = 1;
+    return 1;
+}
+
 int clampi(int v, int lo, int hi) {
     return (v < lo) ? lo : (v > hi) ? hi : v;
 }

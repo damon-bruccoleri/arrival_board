@@ -56,6 +56,24 @@ static void tile_draw_fallback_panel(SDL_Renderer *r, SDL_Rect rect, int radius)
 /* Move text up vs background (ref px at 2160p); right-hand ETA tiles stay center-based. */
 #define REF_TEXT_UP_HEADER 22
 #define REF_TEXT_UP_TILE   26
+/* First line inset from tile top; gap to second line (meta / scheduled time). Ref pixels at LAYOUT_REF_HEIGHT. */
+#define REF_TILE_TOP_INSET   20
+#define REF_TILE_LINE1_RAISE 23
+#define REF_TILE_DEST_DY     45
+#define REF_TILE_LINE2_GAP   120
+/* ui_render: pad / header at reference height (2160) before scaling. */
+#define REF_UI_PAD      46
+#define REF_UI_HEADER_H 220
+/* Nominal body strip height at H=LAYOUT_REF_HEIGHT with ref pad/header (matches ui_render geometry). */
+#define REF_UI_BODY_H   (LAYOUT_REF_HEIGHT - 3 * REF_UI_PAD - REF_UI_HEADER_H)
+/* Header interior (ref px): title / stop name / Stop ID / weather row — use px_scaled only (avoid low-H clamp floors). */
+#define REF_HEADER_TITLE_Y       22
+#define REF_HEADER_LEFT_NAME_Y   52
+#define REF_HEADER_STOP_ID_GAP   78
+#define REF_HEADER_RIGHT_TS_GAP  12
+#define REF_HEADER_WEATHER_TUCK  20
+#define REF_HEADER_MOON_DY       20
+#define REF_HEADER_WEATHER_ICON_DY 12
 
 #define STEAM_PUFFS  2
 #define STEAM_SPHERE_OFFSET 60 /* ref px at 2160p height */
@@ -152,8 +170,9 @@ static void draw_tile_left_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
     }
     int inner = clampi((int)(32 * scale), 12, 60);
     int tile_up = px_scaled(scale, REF_TEXT_UP_TILE);
-    int y = left_rect.y + clampi((int)(20 * scale), 8, 40) + px_scaled(scale, 23) - tile_up;
-    int y2 = y + clampi((int)(120 * scale), 70, 190);
+    int y = left_rect.y + px_scaled(scale, REF_TILE_TOP_INSET) + px_scaled(scale, REF_TILE_LINE1_RAISE) -
+            tile_up;
+    int y2 = y + px_scaled(scale, REF_TILE_LINE2_GAP);
     int line1_gap = clampi((int)(10 * scale), 6, 20);
     int left_w = left_rect.w;
 
@@ -187,7 +206,8 @@ static void draw_tile_left_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
     draw_text(r, route_font, route, left_x, y, route_color, 0);
     char dest_line[256];
     snprintf(dest_line, sizeof(dest_line), " - %s", dest);
-    draw_text_trunc(r, f->tile_small, dest_line, left_x + route_w + line1_gap, y + px_scaled(scale, 45), max_dest_w, dim, 0);
+    draw_text_trunc(r, f->tile_small, dest_line, left_x + route_w + line1_gap,
+                    y + px_scaled(scale, REF_TILE_DEST_DY), max_dest_w, dim, 0);
 
     char stopsbuf[32], milesbuf[32];
     if (a->stops_away >= 0) snprintf(stopsbuf, sizeof(stopsbuf), "%d", a->stops_away);
@@ -234,15 +254,16 @@ static void draw_tile_right_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
         /* Tighten vertical spacing. SDL_ttf glyph boxes can include extra vertical
          * whitespace; allowing a small negative gap tucks the lines together while
          * keeping the two-line block vertically centered. */
-        int gap_lo = -(int)(24 * scale);
+        int gap_lo = -px_scaled(scale, 24);
         if (gap_lo > -6) gap_lo = -6;
-        int gap_hi = (int)(4 * scale);
+        int gap_hi = px_scaled(scale, 8);
         if (gap_hi < 2) gap_hi = 2;
         int line_gap = clampi((int)(-0.28f * (float)h2), gap_lo, gap_hi);
         int block_h = h1 + line_gap + h2;
         int top_y = center_y - block_h / 2;
         draw_text(r, mins_font, minsbuf, center_x, top_y, eta_color, 1);
-        draw_text(r, f->tile_small, "min", center_x, top_y + h1 + line_gap - px_scaled(scale, 20), dim, 1);
+        draw_text(r, f->tile_small, "min", center_x,
+                  top_y + h1 + line_gap - px_scaled(scale, 28), dim, 1);
     }
 }
 
@@ -391,7 +412,7 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 }
 
 static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
-    /* dx, dy: reference pixels at LAYOUT_REF_HEIGHT (aligned to background art). */
+    /* dx, dy: tuned at LAYOUT_REF_HEIGHT; dy scales with body strip vs ref so eyes track art after pad/header clamps. */
     static const EyeLayout eyes[] = {
         { 0.36f, 0.19f,   30, 400 },
         { 0.595f, 0.19f, -775, 392 },
@@ -399,6 +420,7 @@ static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
     const int n_eyes = (int)(sizeof(eyes) / sizeof(eyes[0]));
     const int body_h = H - body_y;
     const int radius = clampi((int)(EYE_RADIUS_SCALE * scale), 8, 36);
+    float body_frac = (REF_UI_BODY_H > 0) ? (float)body_h / (float)REF_UI_BODY_H : 1.f;
 
     float t = (float)SDL_GetTicks() * 0.001f;
     float pulse = 0.5f + 0.5f * sinf(t * 6.283185f * EYE_PULSE_HZ);
@@ -408,8 +430,8 @@ static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
 
     for (int i = 0; i < n_eyes; i++) {
         const EyeLayout *e = &eyes[i];
-        int cx = (int)((float)W * e->fx + 0.5f) + px_scaled(scale, e->dx);
-        int cy = (int)(body_y + (float)body_h * e->fy + 0.5f) + px_scaled(scale, e->dy);
+        int cx = (int)((float)W * e->fx + 0.5f) + (int)roundf((float)e->dx * body_frac);
+        int cy = (int)(body_y + (float)body_h * e->fy + 0.5f) + (int)roundf((float)e->dy * body_frac);
         draw_filled_circle(r, cx, cy, radius, cyan);
     }
 }
@@ -426,7 +448,7 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     fill_round_rect(r, hdr, clampi((int)(24 * scale), 10, 40));
 
     int hdr_up = px_scaled(scale, REF_TEXT_UP_HEADER);
-    int title_y = hdr.y + clampi((int)(22 * scale), 10, 36) - hdr_up;
+    int title_y = hdr.y + px_scaled(scale, REF_HEADER_TITLE_Y) - hdr_up;
     TTF_Font *title_font = (f->title_font) ? f->title_font : f->h1;
     draw_text(r, title_font, "Arrival Board", hdr.x + hdr.w / 2, title_y, white, 1);
 
@@ -435,12 +457,12 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     else snprintf(left1, sizeof(left1), "Stop %s", stop_id ? stop_id : "--");
 
     int left_x = hdr.x + pad;
-    int top_y  = hdr.y + clampi((int)(52 * scale), 28, 80) - hdr_up;
+    int top_y  = hdr.y + px_scaled(scale, REF_HEADER_LEFT_NAME_Y) - hdr_up;
     draw_text_trunc(r, f->h2, left1, left_x, top_y, hdr.w - 2 * pad - (int)(560 * scale), white, 0);
 
     char left2[256];
     snprintf(left2, sizeof(left2), "Stop %s", stop_id ? stop_id : "--");
-    draw_text(r, f->h2, left2, left_x, top_y + clampi((int)(78 * scale), 44, 120), dim, 0);
+    draw_text(r, f->h2, left2, left_x, top_y + px_scaled(scale, REF_HEADER_STOP_ID_GAP), dim, 0);
 
     int right_x = hdr.x + hdr.w - pad;
     time_t now = time(NULL);
@@ -471,7 +493,8 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
     if (moon_utf8 && moon_w > 0) {
         int time_right_x = right_x - moon_w - time_moon_gap;
         draw_text(r, f->h2, ts, time_right_x, first_line_y, white, 2);
-        draw_text_scaled(r, emoji_font, moon_utf8, right_x, first_line_y + px_scaled(scale, 20), white, 2, 0.5f);
+        draw_text_scaled(r, emoji_font, moon_utf8, right_x, first_line_y + px_scaled(scale, REF_HEADER_MOON_DY),
+                         white, 2, 0.5f);
     } else {
         draw_text(r, f->h2, ts, right_x, first_line_y, white, 2);
     }
@@ -482,8 +505,8 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
         moon_reserve = moon_w + time_moon_gap + px_scaled(scale, 16);
     int weather_right_x = right_x - moon_reserve;
 
-    int right_line_gap = clampi((int)(12 * scale), 6, 24);
-    int weather_line_offset = -px_scaled(scale, 20);
+    int right_line_gap = px_scaled(scale, REF_HEADER_RIGHT_TS_GAP);
+    int weather_line_offset = -px_scaled(scale, REF_HEADER_WEATHER_TUCK);
 
     if (wx && wx->have) {
         TTF_Font *w_icon_font = emoji_font;
@@ -505,7 +528,8 @@ static void draw_header(SDL_Renderer *r, Fonts *f, int W, int pad, int header_h,
 
         int text_left = weather_right_x - info_w;
         int icon_x = text_left - gap_icon - icon_w;
-        draw_text_scaled(r, w_icon_font, wx->icon, icon_x, y + px_scaled(scale, 20), white, 0, 0.5f);
+        draw_text_scaled(r, w_icon_font, wx->icon, icon_x, y + px_scaled(scale, REF_HEADER_WEATHER_ICON_DY),
+                         white, 0, 0.5f);
         draw_text(r, f->h2, info, weather_right_x, y, white, 2);
     } else {
         draw_text(r, f->h2, "Weather --", weather_right_x,
@@ -633,7 +657,7 @@ static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const Schedul
     int inner = clampi((int)(32 * scale), 12, 60);
     int x = rect.x + inner + px_scaled(scale, 200);
     int tile_up = px_scaled(scale, REF_TEXT_UP_TILE);
-    int y = rect.y + clampi((int)(20 * scale), 8, 40) + px_scaled(scale, 25) - tile_up;
+    int y = rect.y + px_scaled(scale, REF_TILE_TOP_INSET) + px_scaled(scale, 25) - tile_up;
 
     if (!wide_tile_tex)
         tile_draw_fallback_panel(r, rect, radius);
@@ -650,11 +674,12 @@ static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const Schedul
     draw_text(r, f->tile_big, route, x, y, route_color, 0);
     char dest_line[256];
     snprintf(dest_line, sizeof(dest_line), " - %s", dest);
-    draw_text_trunc(r, f->tile_small, dest_line, x + route_w + line1_gap, y + px_scaled(scale, 45), max_dest_w, dim, 0);
+    draw_text_trunc(r, f->tile_small, dest_line, x + route_w + line1_gap, y + px_scaled(scale, REF_TILE_DEST_DY),
+                    max_dest_w, dim, 0);
 
     char line2[128];
     format_scheduled_time(s->when, line2, sizeof(line2));
-    int y2 = y + clampi((int)(120 * scale), 70, 190);
+    int y2 = y + px_scaled(scale, REF_TILE_LINE2_GAP);
     draw_text(r, f->tile_small, line2, x, y2, dim, 0);
 }
 
@@ -1003,8 +1028,8 @@ void ui_render(SDL_Renderer *r, Fonts *f, int W, int H,
     SDL_RenderClear(r);
 
     float scale = layout_scale(H);
-    int pad = clampi((int)(46 * scale), 18, 90);
-    int header_h = clampi((int)(220 * scale), 120, 380);
+    int pad = clampi(px_scaled(scale, REF_UI_PAD), 10, 90);
+    int header_h = clampi(px_scaled(scale, REF_UI_HEADER_H), 64, 380);
     int body_y = pad + header_h + pad;
     int body_h = H - body_y - pad;
     if (body_h < 100) body_h = 100;

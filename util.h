@@ -38,6 +38,9 @@ int arrivals_refresh_eta(Arrival *arr, int n, time_t now);
 /* Set process TZ to America/New_York and call tzset(). Idempotent. */
 void tz_set_ny(void);
 
+/* True on Raspberry Pi Zero / Zero W / Zero WH (BCM2835); false on Pi Zero 2 W and all other models. */
+int util_is_pi_zero_v1(void);
+
 /* --- JSON helpers (return NULL or default; do not free the returned pointers) --- */
 const cJSON *jgeto(const cJSON *o, const char *k);   /* get object member */
 const cJSON *jgeti(const cJSON *a, int idx);         /* get array element */

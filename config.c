@@ -87,4 +87,11 @@ void config_from_env(AppConfig *cfg) {
     resolve_audio_path(cfg->music_path, sizeof(cfg->music_path), "tools/Seaport_Steampunk_Final_Mix.wav");
     resolve_audio_path(cfg->music_loop2_path, sizeof(cfg->music_loop2_path), "tools/SI Ferry.wav");
     resolve_audio_path(cfg->flip_path, sizeof(cfg->flip_path), "tools/ddsm.wav");
+
+    /* Pi Zero (not Zero 2): lighten GPU/CPU load — no background music or ferry overlay; 720p via SDL (main.c). */
+    if (util_is_pi_zero_v1()) {
+        cfg->music_path[0] = '\0';
+        cfg->music_loop2_path[0] = '\0';
+        logf_("Pi Zero / Zero W: using 720p fullscreen; background music and ferry sound disabled");
+    }
 }

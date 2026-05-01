@@ -379,9 +379,13 @@ int main(int argc, char **argv) {
     }
     SDL_SetHint("SDL_RENDER_BATCHING", "1");
 
+    Uint32 winflags = SDL_WINDOW_FULLSCREEN_DESKTOP;
+    if (util_is_pi_zero_v1())
+        winflags = SDL_WINDOW_FULLSCREEN; /* real 1280x720 mode when available; DESKTOP would stay at panel res */
+
     res.win = SDL_CreateWindow("Arrival Board",
                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                               1280, 720, SDL_WINDOW_FULLSCREEN_DESKTOP);
+                               1280, 720, winflags);
     if (!res.win) {
         logf_("CreateWindow failed: %s", SDL_GetError());
         resources_destroy(&res);
@@ -496,7 +500,10 @@ int main(int argc, char **argv) {
         snprintf(local_sn, sizeof(local_sn), "%s", cfg.stop_name_override);
 
     int local_gen = -1;
-    const char *ferry_path = cfg.music_loop2_path[0] ? cfg.music_loop2_path : cfg.flip_path;
+    /* Ferry path: optional SI Ferry loop2, else flip; Pi Zero v1 disables ferry entirely (config clears loop2). */
+    const char *ferry_path = NULL;
+    if (!util_is_pi_zero_v1())
+        ferry_path = cfg.music_loop2_path[0] ? cfg.music_loop2_path : cfg.flip_path;
     AppMode app_mode = APP_RUNNING;
     char config_status[256] = "Ready";
     time_t config_unconnected_since = 0;
