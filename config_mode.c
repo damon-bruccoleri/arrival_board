@@ -208,7 +208,9 @@ void config_mode_stop_helper(ConfigMode *cm) {
 
     pid_t pid = fork();
     if (pid == 0) {
-        execl("/usr/bin/sudo", "sudo", "-n", "tools/config_network.sh", "stop-ap", (char *)NULL);
+        /* bash: stop-ap works even if config_network.sh lost +x after a non-preserving copy */
+        execl("/usr/bin/sudo", "sudo", "-n", "/bin/bash", "tools/config_network.sh", "stop-ap",
+              (char *)NULL);
         _exit(127);
     }
     if (pid > 0) {

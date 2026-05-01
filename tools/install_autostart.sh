@@ -24,7 +24,8 @@ After=pipewire-pulse.service
 
 [Service]
 WorkingDirectory=${REPO_ROOT}
-ExecStart=${REPO_ROOT}/run_arrival_board.sh
+# /bin/bash: avoid systemd 203/EXEC when deploy tools drop the execute bit (e.g. some Windows tar/scp).
+ExecStart=/bin/bash ${REPO_ROOT}/run_arrival_board.sh
 Restart=always
 RestartSec=3
 
@@ -32,10 +33,7 @@ RestartSec=3
 WantedBy=default.target
 UNIT
 
-chmod +x "${REPO_ROOT}/run_arrival_board.sh" 2>/dev/null || true
-chmod +x "${REPO_ROOT}/tools/config_mode.sh" \
-         "${REPO_ROOT}/tools/config_network.sh" \
-         "${REPO_ROOT}/tools/config_portal/portal.py" 2>/dev/null || true
+bash "${SCRIPT_DIR}/fix_deploy_permissions.sh"
 
 systemctl --user daemon-reload
 systemctl --user enable arrival-board.service

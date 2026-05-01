@@ -45,5 +45,8 @@ ssh -o ConnectTimeout=15 "$DEST" 'mkdir -p ~/arrival_board'
 rsync "${RSYNC_OPTS[@]}" "${EXCLUDES[@]}" \
   "$ROOT/" "$DEST:~/arrival_board/"
 
+# Shell scripts stay executable; without this, copies that omit modes can break systemd/helpers.
+ssh -o ConnectTimeout=15 "$DEST" 'cd ~/arrival_board && bash tools/fix_deploy_permissions.sh'
+
 echo "Synced $ROOT/ -> $DEST:~/arrival_board/"
 echo "On the Pi: cd ~/arrival_board && bash tools/setup_pi.sh   # first time, or: make clean && make && bash tools/install_autostart.sh"

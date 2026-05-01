@@ -322,13 +322,12 @@ echo "  arrival-board.service installed (starts on boot after reboot)"
 # the physical GPIO13 setup switch is pressed.
 SUDOERS_FILE="/etc/sudoers.d/arrival-board-config"
 sudo tee "$SUDOERS_FILE" >/dev/null <<EOF
-$(id -un) ALL=(root) NOPASSWD: ${PROJECT_DIR}/tools/config_network.sh *
+# Direct path (if +x) and /bin/bash wrapper (modeless deploys); config_mode.c uses sudo bash ... stop-ap
+$(id -un) ALL=(root) NOPASSWD: ${PROJECT_DIR}/tools/config_network.sh *, /bin/bash ${PROJECT_DIR}/tools/config_network.sh *
 EOF
 sudo chmod 0440 "$SUDOERS_FILE"
 sudo visudo -cf "$SUDOERS_FILE" >/dev/null
-chmod +x "$PROJECT_DIR/tools/config_mode.sh" "$PROJECT_DIR/tools/config_network.sh" \
-         "$PROJECT_DIR/tools/verify_aplay_device.sh" \
-         "$PROJECT_DIR/tools/config_portal/portal.py" 2>/dev/null || true
+bash "$SCRIPT_DIR/fix_deploy_permissions.sh"
 echo "  config-mode sudo helper installed"
 
 # ---------------------------------------------------------------------------
