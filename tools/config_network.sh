@@ -130,6 +130,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import tempfile
 
 request, iface = sys.argv[1], sys.argv[2]
 data = json.loads(pathlib.Path(request).read_text(encoding="utf-8"))
@@ -167,8 +168,19 @@ def network_block() -> str:
 
 conf = pathlib.Path("/etc/wpa_supplicant/wpa_supplicant.conf")
 conf.parent.mkdir(parents=True, exist_ok=True)
-conf.write_text("country=US\nctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\n\n" + network_block(), encoding="utf-8")
-os.chmod(conf, 0o600)
+contents = "country=US\nctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev\nupdate_config=1\n\n" + network_block()
+with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=str(conf.parent), delete=False) as tmp:
+    tmp.write(contents)
+    tmp.flush()
+    os.fsync(tmp.fileno())
+    tmp_name = tmp.name
+os.chmod(tmp_name, 0o600)
+os.replace(tmp_name, conf)
+dir_fd = os.open(str(conf.parent), os.O_RDONLY)
+try:
+    os.fsync(dir_fd)
+finally:
+    os.close(dir_fd)
 
 if subprocess.call(["sh", "-c", "command -v nmcli >/dev/null 2>&1"]) == 0:
     subprocess.run(["nmcli", "connection", "delete", "ArrivalBoard-WiFi"], stderr=subprocess.DEVNULL)
@@ -199,6 +211,8 @@ if subprocess.call(["sh", "-c", "command -v nmcli >/dev/null 2>&1"]) == 0:
 PY
   stop_ap
   restore_client_wifi
+  # Flush filesystem writes before forced reboot to reduce corruption risk.
+  sync
   status "Rebooting"
   systemctl reboot
 }
@@ -207,6 +221,10 @@ case "${1:-}" in
   start-ap) start_ap ;;
   stop-ap) require_root; stop_ap; restore_client_wifi; status "Ready" ;;
   apply) shift; apply_config "$@" ;;
+  --help|-h)
+    echo "Usage: $0 {start-ap|stop-ap|apply REQUEST_JSON}"
+    exit 0
+    ;;
   *)
     echo "Usage: $0 {start-ap|stop-ap|apply REQUEST_JSON}" >&2
     exit 2

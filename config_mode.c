@@ -30,6 +30,11 @@ static const char *status_path_default(void) {
     return (p && *p) ? p : "/tmp/arrival_board_config_status";
 }
 
+static const char *self_check_status_path_default(void) {
+    const char *p = getenv("CONFIG_SELF_CHECK_STATUS_PATH");
+    return (p && *p) ? p : "/tmp/arrival_board_self_check_status";
+}
+
 static void write_status(ConfigMode *cm, const char *status) {
     if (!cm || !cm->status_path[0] || !status) return;
     FILE *f = fopen(cm->status_path, "w");
@@ -170,6 +175,25 @@ int config_mode_poll_pressed(ConfigMode *cm) {
 
 int config_mode_start_helper(ConfigMode *cm) {
     if (!cm) return -1;
+    {
+        const char *self_check_path = self_check_status_path_default();
+        FILE *f = fopen(self_check_path, "r");
+        if (f) {
+            char line[256] = {0};
+            if (fgets(line, (int)sizeof(line), f)) {
+                size_t n = strlen(line);
+                while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+                    line[--n] = '\0';
+                if (line[0]) {
+                    write_status(cm, line);
+                    logf_("CONFIG_MODE blocked by startup self-check: %s", line);
+                    fclose(f);
+                    return -1;
+                }
+            }
+            fclose(f);
+        }
+    }
     write_status(cm, "Starting hotspot");
 
     pid_t pid = fork();
@@ -223,15 +247,22 @@ void config_mode_stop_helper(ConfigMode *cm) {
 
 void config_mode_read_status(const ConfigMode *cm, char *dst, size_t dstsz) {
     if (!dst || dstsz == 0) return;
-    snprintf(dst, dstsz, "Starting hotspot");
-    if (!cm || !cm->status_path[0]) return;
+    if (!cm || !cm->status_path[0]) {
+        if (!dst[0]) snprintf(dst, dstsz, "Ready");
+        return;
+    }
 
     FILE *f = fopen(cm->status_path, "r");
-    if (!f) return;
-    if (fgets(dst, (int)dstsz, f)) {
-        size_t n = strlen(dst);
-        while (n > 0 && (dst[n - 1] == '\n' || dst[n - 1] == '\r'))
-            dst[--n] = '\0';
+    if (!f) {
+        if (!dst[0]) snprintf(dst, dstsz, "Ready");
+        return;
+    }
+    char line[256] = {0};
+    if (fgets(line, (int)sizeof(line), f)) {
+        size_t n = strlen(line);
+        while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
+            line[--n] = '\0';
+        if (line[0]) snprintf(dst, dstsz, "%s", line);
     }
     fclose(f);
 }

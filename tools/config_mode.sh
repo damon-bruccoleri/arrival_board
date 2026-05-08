@@ -15,6 +15,15 @@ status() {
 monitor_phone_connection() {
   local connected=0
   while true; do
+    local current_status=""
+    if [ -f "$STATUS_PATH" ]; then
+      current_status="$(tr -d '\r\n' < "$STATUS_PATH" 2>/dev/null || true)"
+    fi
+    case "$current_status" in
+      Applying*|Reboot*|Saving\ configuration*|Apply\ failed*)
+        break
+        ;;
+    esac
     if iw dev "$IFACE" station dump 2>/dev/null | grep -q '^Station '; then
       if [ "$connected" -ne 1 ]; then
         status "Connected"
@@ -35,7 +44,12 @@ case "${1:-}" in
     status "Loading bus stop list"
     python3 "$ROOT_DIR/tools/config_portal/portal.py" --refresh-stops >/dev/null 2>&1 || true
     status "Starting hotspot"
-    sudo -n "$SCRIPT_DIR/config_network.sh" start-ap
+    if ! sudo -n "$SCRIPT_DIR/config_network.sh" start-ap; then
+      status "Apply failed: hotspot start failed"
+      # Keep helper alive briefly so UI can show explicit failure text.
+      sleep 10
+      exit 1
+    fi
     status "Hotspot enabled. Connect to ArrivalBoard"
     monitor_phone_connection &
     cd "$ROOT_DIR"

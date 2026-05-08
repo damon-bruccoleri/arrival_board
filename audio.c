@@ -37,6 +37,10 @@ typedef struct {
     uint32_t flip_bytes;
     uint32_t flip_pos_frames;
     int flip_active;
+
+    /* Reused mix accumulator to avoid callback-time heap churn/jitter. */
+    int32_t *mix_acc;
+    uint32_t mix_acc_frames;
 } AudioState;
 
 static AudioState g_audio;
@@ -56,6 +60,14 @@ static void free_buf(Uint8 **p) {
         SDL_free(*p);
         *p = NULL;
     }
+}
+
+static void free_mix_acc(void) {
+    if (g_audio.mix_acc) {
+        SDL_free(g_audio.mix_acc);
+        g_audio.mix_acc = NULL;
+    }
+    g_audio.mix_acc_frames = 0;
 }
 
 static int parse_env_int(const char *k, int defv, int lo, int hi) {
@@ -160,7 +172,13 @@ static void audio_callback(void *userdata, Uint8 *stream, int len) {
         return;
     }
 
-    int32_t *acc = (int32_t *)SDL_calloc((size_t)frames * (size_t)channels, sizeof(int32_t));
+    if (!g_audio.mix_acc || g_audio.mix_acc_frames < (uint32_t)frames) {
+        memset(stream, 0, (size_t)len);
+        return;
+    }
+    int32_t *acc = g_audio.mix_acc;
+    memset(acc, 0, (size_t)frames * (size_t)channels * sizeof(int32_t));
+
     if (!acc) {
         memset(stream, 0, (size_t)len);
         return;
@@ -224,7 +242,6 @@ static void audio_callback(void *userdata, Uint8 *stream, int len) {
     int16_t *out = (int16_t *)stream;
     for (int i = 0; i < frames * channels; i++)
         out[i] = clamp_s16(acc[i]);
-    SDL_free(acc);
 }
 
 int audio_init(const char *music_path, const char *ferry_path, const char *flip_path) {
@@ -242,7 +259,7 @@ int audio_init(const char *music_path, const char *ferry_path, const char *flip_
     want.freq = 44100;
     want.format = AUDIO_S16SYS;
     want.channels = 2;
-    want.samples = 1024;
+    want.samples = parse_env_int("AUDIO_SAMPLES", 2048, 256, 8192);
     want.callback = audio_callback;
     want.userdata = NULL;
 
@@ -263,6 +280,20 @@ int audio_init(const char *music_path, const char *ferry_path, const char *flip_
     g_audio.initialized = 1;
     g_audio.paused = 0;
 
+    /* Allocate enough headroom for larger callback blocks to prevent runtime allocs. */
+    g_audio.mix_acc_frames = (uint32_t)have.samples * 4u;
+    if (g_audio.mix_acc_frames < 4096u)
+        g_audio.mix_acc_frames = 4096u;
+    g_audio.mix_acc = (int32_t *)SDL_calloc(
+        (size_t)g_audio.mix_acc_frames * (size_t)have.channels, sizeof(int32_t));
+    if (!g_audio.mix_acc) {
+        if (audio_debug_enabled())
+            fprintf(stderr, "AUDIO_DEBUG: mix accumulator alloc failed\n");
+        SDL_CloseAudioDevice(dev);
+        memset(&g_audio, 0, sizeof(g_audio));
+        return -1;
+    }
+
     /* Convert/preload assets */
     (void)load_and_convert(flip_path, &g_audio.have, &g_audio.flip_buf, &g_audio.flip_bytes);
     (void)load_and_convert(music_path, &g_audio.have, &g_audio.music_buf, &g_audio.music_bytes);
@@ -282,6 +313,7 @@ int audio_init(const char *music_path, const char *ferry_path, const char *flip_
     if (audio_debug_enabled()) {
         fprintf(stderr, "AUDIO_DEBUG: device freq=%d ch=%d fmt=0x%x samples=%d\n",
                 g_audio.have.freq, g_audio.have.channels, g_audio.have.format, g_audio.have.samples);
+        fprintf(stderr, "AUDIO_DEBUG: mix_acc_frames=%u\n", g_audio.mix_acc_frames);
         fprintf(stderr, "AUDIO_DEBUG: music=%s bytes=%u\n", (music_path && *music_path) ? music_path : "(none)", g_audio.music_bytes);
         fprintf(stderr, "AUDIO_DEBUG: ferry=%s bytes=%u\n", (ferry_path && *ferry_path) ? ferry_path : "(none)", g_audio.ferry_bytes);
         fprintf(stderr, "AUDIO_DEBUG: flip=%s bytes=%u\n", (flip_path && *flip_path) ? flip_path : "(none)", g_audio.flip_bytes);
@@ -306,6 +338,7 @@ void audio_shutdown(void) {
     free_buf(&g_audio.music_buf);
     free_buf(&g_audio.ferry_buf);
     free_buf(&g_audio.flip_buf);
+    free_mix_acc();
 
     memset(&g_audio, 0, sizeof(g_audio));
 }

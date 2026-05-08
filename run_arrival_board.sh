@@ -12,6 +12,9 @@ if [ -f "$AB_ROOT/arrival_board.env" ]; then
   . "$AB_ROOT/arrival_board.env"
   set +a
 fi
+# Force SDL through PipeWire/Pulse unless explicitly overridden.
+# This avoids SDL falling back to direct ALSA on the wrong device.
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-pulse}"
 ulimit -n "${ULIMIT_NOFILE:-16384}" || true
 
 # operate on controlling tty (tty1) without hardcoding redirections that can hang
@@ -29,6 +32,9 @@ printf "\033[?25l" || true
 BOOTLOG="${BOOT_LOG_PATH:-$AB_ROOT/boot.log}"
 if [ ! -f "$AB_ROOT/tools/asoundrc" ]; then
   echo "$(date -Iseconds): tools/asoundrc missing" >> "$BOOTLOG"
+fi
+if [ -x "$AB_ROOT/tools/startup_self_check.sh" ]; then
+  "$AB_ROOT/tools/startup_self_check.sh" || true
 fi
 
 # Unmute Pi HDMI output (try HDMI control first, then Master; often muted after boot).

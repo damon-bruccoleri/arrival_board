@@ -372,12 +372,16 @@ int main(int argc, char **argv) {
     SDL_SetHint("SDL_RENDER_BATCHING", "1");
 
     Uint32 winflags = SDL_WINDOW_FULLSCREEN_DESKTOP;
-    if (util_is_pi_zero_v1())
-        winflags = SDL_WINDOW_FULLSCREEN; /* real 1280x720 mode when available; DESKTOP would stay at panel res */
+    int target_w = 3840;
+    int target_h = 2160;
+    if (util_is_pi_zero_v1()) {
+        target_w = 1920;
+        target_h = 1080;
+    }
 
     res.win = SDL_CreateWindow("Arrival Board",
                                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                               1280, 720, winflags);
+                               target_w, target_h, winflags);
     if (!res.win) {
         logf_("CreateWindow failed: %s", SDL_GetError());
         resources_destroy(&res);
@@ -393,9 +397,11 @@ int main(int argc, char **argv) {
     }
     SDL_Renderer *r = res.renderer;
 
-    int W = 0, H = 0;
-    SDL_GetRendererOutputSize(r, &W, &H);
-    if (W <= 0 || H <= 0) SDL_GetWindowSize(res.win, &W, &H);
+    /* Force the software logical size to the target 4K (or 1080p) mode */
+    SDL_RenderSetLogicalSize(r, target_w, target_h);
+
+    int W = target_w;
+    int H = target_h;
 
     texture_load(r, &res.bg_tex, &res.steam_tex, &res.logo_tex,
                  &res.wide_tile_tex, &res.narrow_tile_tex);
@@ -558,7 +564,7 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            SDL_GetRendererOutputSize(r, &W, &H);
+            /* W and H remain target_w and target_h via logical size */
             if (strstr(config_status, "Applying") || strstr(config_status, "Reboot"))
                 app_mode = APP_CONFIG_APPLYING;
             ui_render_config(r, &res.fonts, W, H, config_status);
@@ -604,7 +610,7 @@ int main(int argc, char **argv) {
                 audio_trigger_flip();
         }
 
-        SDL_GetRendererOutputSize(r, &W, &H);
+        /* W and H remain target_w and target_h via logical size */
         static FlipSoundCtx flip_ctx;
         if (cfg.flip_path[0]) {
             flip_ctx.flip_path       = cfg.flip_path;

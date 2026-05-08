@@ -31,13 +31,32 @@ NETWORK_SCRIPT = ROOT / "tools" / "config_network.sh"
 DEFAULT_GTFS_URL = "https://rrgtfsfeeds.s3.amazonaws.com/gtfs_busco.zip"
 
 
+def atomic_write_text(path: pathlib.Path, content: str, mode: int = 0o600) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as tmp:
+            tmp.write(content)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.chmod(tmp_name, mode)
+        os.replace(tmp_name, path)
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except Exception:
+            pass
+        raise
+
+
 def set_status(message: str) -> None:
     try:
-        STATUS_PATH.unlink(missing_ok=True)
-    except Exception:
-        pass
-    try:
-        STATUS_PATH.write_text(message + "\n", encoding="utf-8")
+        atomic_write_text(STATUS_PATH, message + "\n", mode=0o666)
     except PermissionError:
         return
 
@@ -75,8 +94,15 @@ def update_env(values: dict[str, str]) -> None:
     fd, tmp_name = tempfile.mkstemp(prefix=".arrival_board.env.", dir=str(ENV_PATH.parent))
     with os.fdopen(fd, "w", encoding="utf-8") as tmp:
         tmp.write("\n".join(out).rstrip() + "\n")
+        tmp.flush()
+        os.fsync(tmp.fileno())
     os.chmod(tmp_name, 0o600)
     os.replace(tmp_name, ENV_PATH)
+    dir_fd = os.open(str(ENV_PATH.parent), os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def safe_filename(name: str) -> str:
@@ -386,8 +412,7 @@ class Handler(BaseHTTPRequestHandler):
 
         set_status("Saving configuration")
         update_env({"MTA_KEY": mta_key, "STOP_ID": stop_id})
-        REQUEST_PATH.write_text(json.dumps(payload), encoding="utf-8")
-        os.chmod(REQUEST_PATH, 0o600)
+        atomic_write_text(REQUEST_PATH, json.dumps(payload), mode=0o600)
         set_status("Applying WiFi and rebooting")
 
         try:
