@@ -371,7 +371,7 @@ int main(int argc, char **argv) {
     }
     SDL_SetHint("SDL_RENDER_BATCHING", "1");
 
-    Uint32 winflags = SDL_WINDOW_FULLSCREEN;
+    Uint32 winflags = SDL_WINDOW_FULLSCREEN_DESKTOP;
     int target_w = 3840;
     int target_h = 2160;
     FILE *f_model = fopen("/proc/device-tree/model", "r");
