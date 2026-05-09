@@ -29,6 +29,7 @@ startx.log
 # Stray debug / junk files
 last_beep_ms
 tools/Untitled
+deploy.tar.gz
 
 # Editor / OS
 .DS_Store
