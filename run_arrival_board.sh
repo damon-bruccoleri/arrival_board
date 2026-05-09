@@ -79,8 +79,20 @@ if [ -n "${APLAY_DEVICE:-}" ]; then
 else
   # echo "APLAY_DEVICE unset (using Pulse/PipeWire)"
   start_sound_server || true
-  # Prefer HDMI so music/ferry/flip play to the display (Pi default is often headphone jack).
-  pactl set-default-sink alsa_output.platform-fef00700.hdmi.hdmi-stereo 2>/dev/null || true
+  # PipeWire often marks vc4 HDMI ports "not available" while ALSA still works;
+  # forcing output:hdmi-stereo creates the sink so SDL Pulse sees real HDMI.
+  while read -r _ card _; do
+    case "$card" in *hdmi*)
+      pactl set-card-profile "$card" output:hdmi-stereo 2>/dev/null || true ;;
+    esac
+  done < <(pactl list short cards 2>/dev/null)
+  # Prefer HDMI (sink name differs Pi Zero vs Pi 4); avoid auto_null dummy sink.
+  hdmi_sink="$(pactl list short sinks 2>/dev/null | awk '/hdmi/ && $2 !~ /auto_null/ { print $2; exit }')"
+  if [ -n "$hdmi_sink" ]; then
+    pactl set-default-sink "$hdmi_sink" 2>/dev/null || true
+  else
+    pactl set-default-sink alsa_output.platform-fef00700.hdmi.hdmi-stereo 2>/dev/null || true
+  fi
 fi
 
 PI_MODEL="$(tr -d '\000' </proc/device-tree/model 2>/dev/null || true)"
