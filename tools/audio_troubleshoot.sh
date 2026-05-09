@@ -12,7 +12,7 @@ echo ""
 
 # 1. Check sound files exist
 echo "1. Sound files:"
-for f in tools/flip.wav tools/Seaport_Steampunk_Final_Mix.wav; do
+for f in tools/ddsm.wav tools/Seaport_Steampunk_Final_Mix.wav; do
   if [ -f "$f" ]; then
     echo "   OK: $f"
   else
@@ -26,20 +26,20 @@ echo "2. ALSA playback devices (aplay -L):"
 aplay -L 2>/dev/null || echo "   aplay -L failed"
 echo ""
 
-# 3. Test aplay with flip.wav
-if [ -f tools/flip.wav ]; then
-  echo "3. Testing aplay with tools/flip.wav:"
+# 3. Test aplay with tools/ddsm.wav
+if [ -f tools/ddsm.wav ]; then
+  echo "3. Testing aplay with tools/ddsm.wav:"
   for dev in "default" "plughw:CARD=vc4hdmi0,DEV=0" "hdmi:CARD=vc4hdmi0,DEV=0" "plughw:0,0"; do
     printf "   %-35s ... " "$dev"
-    if aplay -q -D "$dev" tools/flip.wav 2>/dev/null; then
+    if aplay -q -D "$dev" tools/ddsm.wav 2>/dev/null; then
       echo "OK (did you hear a sound?)"
     else
       echo "failed"
-      aplay -D "$dev" tools/flip.wav 2>&1 | head -3 || true
+      aplay -D "$dev" tools/ddsm.wav 2>&1 | head -3 || true
     fi
   done
 else
-  echo "3. Skipping aplay test (tools/flip.wav not found). Run: make tools/flip.wav"
+  echo "3. Skipping aplay test (tools/ddsm.wav not found)."
 fi
 echo ""
 

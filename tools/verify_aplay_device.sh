@@ -5,18 +5,18 @@
 #   aplay -L | sed -n '1,40p'    # list devices
 #   bash tools/verify_aplay_device.sh 'plughw:CARD=vc4hdmi0,DEV=0'
 #
-# Uses Front_Center.wav if present, else $REPO/flip.wav.
+# Uses Front_Center.wav if present, else $REPO/tools/ddsm.wav.
 
 set -euo pipefail
 DEVICE="${1:?Usage: $0 ALSA_device   e.g. plughw:CARD=vc4hdmi0,DEV=0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CAND=("/usr/share/sounds/alsa/Front_Center.wav" "$ROOT/flip.wav")
+CAND=("/usr/share/sounds/alsa/Front_Center.wav" "$ROOT/tools/ddsm.wav")
 WAV=""
 for f in "${CAND[@]}"; do
   if [[ -f "$f" ]]; then WAV="$f"; break; fi
 done
 if [[ -z "$WAV" ]]; then
-  echo "No test WAV found (install alsa-utils or add flip.wav)." >&2
+  echo "No test WAV found (install alsa-utils or add tools/ddsm.wav)." >&2
   exit 1
 fi
 echo "Playing: $WAV"

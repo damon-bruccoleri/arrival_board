@@ -47,11 +47,6 @@ static void render_copy_blended(SDL_Renderer *r, SDL_Texture *tex, const SDL_Rec
     SDL_RenderCopy(r, tex, NULL, dst);
 }
 
-/* Solid panel when wide/narrow PNG is unavailable. */
-static void tile_draw_fallback_panel(SDL_Renderer *r, SDL_Rect rect, int radius) {
-    SDL_SetRenderDrawColor(r, 18, 20, 26, 255);
-    fill_round_rect(r, rect, radius);
-}
 
 /* Move text up vs background (ref px at 2160p); right-hand ETA tiles stay center-based. */
 #define REF_TEXT_UP_HEADER 22
@@ -163,11 +158,8 @@ static void draw_tile_left_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
                                   SDL_Color white, SDL_Color dim, int radius,
                                   SDL_Texture *wide_tile_tex) {
     (void)white;
-    if (wide_tile_tex) {
-        /* WideTile is drawn in draw_tile_grid; here we draw only text on transparent. */
-    } else {
-        tile_draw_fallback_panel(r, left_rect, radius);
-    }
+    (void)wide_tile_tex;
+    (void)radius;
     int inner = clampi((int)(32 * scale), 12, 60);
     int tile_up = px_scaled(scale, REF_TEXT_UP_TILE);
     int y = left_rect.y + px_scaled(scale, REF_TILE_TOP_INSET) + px_scaled(scale, REF_TILE_LINE1_RAISE) -
@@ -225,8 +217,8 @@ static void draw_tile_right_content(SDL_Renderer *r, Fonts *f, const Arrival *a,
                                    SDL_Color white, SDL_Color dim, int radius,
                                    SDL_Texture *narrow_tile_tex) {
 
-    if (!narrow_tile_tex)
-        tile_draw_fallback_panel(r, right_rect, radius);
+    (void)narrow_tile_tex;
+    (void)radius;
 
     char minsbuf[16];
     if (a->mins == 0) snprintf(minsbuf, sizeof(minsbuf), "NOW");
@@ -414,8 +406,8 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
     /* dx, dy: tuned at LAYOUT_REF_HEIGHT; dy scales with body strip vs ref so eyes track art after pad/header clamps. */
     static const EyeLayout eyes[] = {
-        { 0.36f, 0.19f,   30, 400 },
-        { 0.595f, 0.19f, -775, 392 },
+        { 0.36f, 0.19f,   30, 390 },
+        { 0.595f, 0.19f, -751, 382 },
     };
     const int n_eyes = (int)(sizeof(eyes) / sizeof(eyes[0]));
     const int body_h = H - body_y;
@@ -667,14 +659,13 @@ static void format_scheduled_time(time_t when, char *buf, size_t bufsz) {
 static void draw_scheduled_tile_content(SDL_Renderer *r, Fonts *f, const ScheduledDeparture *s,
                                         SDL_Rect rect, float scale, int radius,
                                         SDL_Texture *wide_tile_tex) {
+    (void)wide_tile_tex;
+    (void)radius;
     SDL_Color dim   = { 210, 210, 210, 255 };
     int inner = clampi((int)(32 * scale), 12, 60);
     int x = rect.x + inner + px_scaled(scale, 200);
     int tile_up = px_scaled(scale, REF_TEXT_UP_TILE);
     int y = rect.y + px_scaled(scale, REF_TILE_TOP_INSET) + px_scaled(scale, 25) - tile_up;
-
-    if (!wide_tile_tex)
-        tile_draw_fallback_panel(r, rect, radius);
 
     const char *route = s->route[0] ? s->route : "--";
     const char *dest  = s->dest[0]  ? s->dest  : "--";
