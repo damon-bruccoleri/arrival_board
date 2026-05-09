@@ -374,9 +374,17 @@ int main(int argc, char **argv) {
     Uint32 winflags = SDL_WINDOW_FULLSCREEN_DESKTOP;
     int target_w = 3840;
     int target_h = 2160;
-    if (util_is_pi_zero_v1()) {
-        target_w = 1920;
-        target_h = 1080;
+    FILE *f_model = fopen("/proc/device-tree/model", "r");
+    if (f_model) {
+        char buf_model[256];
+        size_t n = fread(buf_model, 1, sizeof(buf_model) - 1, f_model);
+        buf_model[n] = '\0';
+        fclose(f_model);
+        if (strstr(buf_model, "Zero")) {
+            target_w = 1920;
+            target_h = 1080;
+            logf_("Pi Zero detected (v1 or v2): setting logical resolution to 1080p.");
+        }
     }
 
     res.win = SDL_CreateWindow("Arrival Board",
