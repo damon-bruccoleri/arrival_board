@@ -372,9 +372,14 @@ int main(int argc, char **argv) {
     SDL_SetHint("SDL_RENDER_BATCHING", "1");
 
     /*
-     * Pi Zero family: use SDL_WINDOW_FULLSCREEN (explicit mode) not FULLSCREEN_DESKTOP.
-     * After exit, the KMS console often falls back to ~1024×768; DESKTOP would adopt that on
-     * the next start while a cold boot still looks like 1080p — matching "768p after restart".
+     * Pi Zero / Zero 2 W: SDL_WINDOW_FULLSCREEN at 1920×1080 so SDL asks KMS to
+     * mode-set to 1080p explicitly.  FULLSCREEN_DESKTOP inherits whatever the
+     * console left behind, which after a service restart is often 1024×768.
+     * run_arrival_board.sh ensures the connector re-detect runs before we get
+     * here so the 1080p mode is in the KMS mode list.
+     *
+     * Pi 4 / Pi 5: SDL_WINDOW_FULLSCREEN_DESKTOP at 4K logical size; the
+     * desktop is already native 4K on those boards.
      */
     Uint32 winflags = SDL_WINDOW_FULLSCREEN_DESKTOP;
     int target_w = 3840;
@@ -389,7 +394,7 @@ int main(int argc, char **argv) {
             target_w = 1920;
             target_h = 1080;
             winflags = SDL_WINDOW_FULLSCREEN;
-            logf_("Pi Zero detected (v1 or v2): 1080p logical + SDL_WINDOW_FULLSCREEN (avoid stale desktop mode).");
+            logf_("Pi Zero family: 1080p + SDL_WINDOW_FULLSCREEN.");
         }
     }
 
@@ -413,6 +418,15 @@ int main(int argc, char **argv) {
 
     /* Force the software logical size to the target 4K (or 1080p) mode */
     SDL_RenderSetLogicalSize(r, target_w, target_h);
+
+    {
+        int ow, oh;
+        SDL_GetRendererOutputSize(r, &ow, &oh);
+        SDL_DisplayMode dm;
+        SDL_GetCurrentDisplayMode(0, &dm);
+        logf_("SDL display: renderer=%dx%d mode=%dx%d@%dHz target=%dx%d",
+              ow, oh, dm.w, dm.h, dm.refresh_rate, target_w, target_h);
+    }
 
     int W = target_w;
     int H = target_h;

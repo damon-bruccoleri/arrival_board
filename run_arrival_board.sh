@@ -83,7 +83,53 @@ else
   pactl set-default-sink alsa_output.platform-fef00700.hdmi.hdmi-stereo 2>/dev/null || true
 fi
 
+PI_MODEL="$(tr -d '\000' </proc/device-tree/model 2>/dev/null || true)"
+IS_PI_ZERO=0
+case "$PI_MODEL" in *Zero*) IS_PI_ZERO=1 ;; esac
+
+hdmi_has_1080p() {
+  grep -q '^1920x1080$' /sys/class/drm/card0-HDMI-A-1/modes 2>/dev/null
+}
+
+# Force KMS to re-read EDID so 1080p modes appear after a service restart.
+# Only needed on Pi Zero family; must run while no DRM client holds the display.
+ensure_1080p_modes() {
+  [ "$IS_PI_ZERO" -eq 1 ] || return 0
+  hdmi_has_1080p && return 0
+
+  for attempt in 1 2 3; do
+    echo detect | sudo tee /sys/class/drm/card0-HDMI-A-1/status >/dev/null 2>&1 || true
+    sleep 2
+    if hdmi_has_1080p; then
+      return 0
+    fi
+  done
+
+  # All re-detect attempts failed — reboot is the only reliable recovery.
+  local stamp_file="/tmp/arrival_board_1080p_reboot.stamp"
+  local now last
+  now="$(date +%s)"
+  last="$(cat "$stamp_file" 2>/dev/null || echo 0)"
+  if [ $((now - last)) -lt 300 ]; then
+    echo "$(date -Iseconds): 1080p reboot skipped (cooldown, last $(( now - last ))s ago)" >> "$BOOTLOG"
+    return 1
+  fi
+  echo "$now" > "$stamp_file" 2>/dev/null || true
+  echo "$(date -Iseconds): 1080p recovery reboot (modes stuck at low-res after 3 detect attempts)" >> "$BOOTLOG"
+  sync
+  sudo reboot
+  sleep 60
+}
+
 while true; do
+  # Wait for any lingering previous instance to fully release the DRM device.
+  for _ in 1 2 3 4 5; do
+    pgrep -x arrival_board >/dev/null 2>&1 || break
+    sleep 1
+  done
+
+  ensure_1080p_modes
+
   ./arrival_board
   sleep 2
 done

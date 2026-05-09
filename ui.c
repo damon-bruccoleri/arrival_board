@@ -321,6 +321,9 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
      */
     const float exhaust_nx[STEAM_PUFFS] = { 0.26f, 0.80f };
     const float exhaust_ny[STEAM_PUFFS] = { 0.48f, 0.48f };
+    /* Ref-space px @ LAYOUT_REF_HEIGHT; scaled like other UI so ~1080p logical matches tune. */
+    static const int steam_anchor_dx_ref[STEAM_PUFFS] = { -210, 200 };
+    static const int steam_anchor_dy_ref[STEAM_PUFFS] = { 70, -50 };
     const float rise_speed = 4.4f;
     const float fade_speed = 0.28f;
     const float scale_grow = 0.012f;
@@ -333,8 +336,10 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
         last_body_y = body_y;
         last_bg_h = bg_h;
         for (int i = 0; i < STEAM_PUFFS; i++) {
-            float ex_x = exhaust_nx[i] * (float)W;
-            float ex_y = (float)body_y + exhaust_ny[i] * (float)bg_h;
+            float ax = (float)px_scaled(scale, steam_anchor_dx_ref[i]);
+            float ay = (float)px_scaled(scale, steam_anchor_dy_ref[i]);
+            float ex_x = exhaust_nx[i] * (float)W + ax;
+            float ex_y = (float)body_y + exhaust_ny[i] * (float)bg_h + ay;
             /* Small jitter only (ref-scaled); keeps both stacks on the pipes. */
             float jx = (float)((i * 17) % 21 - 10) * scale;
             float jy = (float)((i * 11) % 12) * scale;
@@ -371,8 +376,10 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
         if (puffs[i].alpha <= 0.f ||
             puffs[i].y < (float)(body_y - px_scaled(scale, 120)) ||
             (i == 1 && puffs[i].x > (float)W)) {
-            float ex_x = exhaust_nx[i] * (float)W;
-            float ex_y = (float)body_y + exhaust_ny[i] * (float)bg_h;
+            float ax = (float)px_scaled(scale, steam_anchor_dx_ref[i]);
+            float ay = (float)px_scaled(scale, steam_anchor_dy_ref[i]);
+            float ex_x = exhaust_nx[i] * (float)W + ax;
+            float ex_y = (float)body_y + exhaust_ny[i] * (float)bg_h + ay;
             puffs[i].x = ex_x + (float)((i * 17) % 21 - 10) * scale;
             puffs[i].y = ex_y + (float)((i * 11) % 12) * scale;
             puffs[i].alpha = start_alpha;
@@ -406,8 +413,8 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
     /* dx, dy: tuned at LAYOUT_REF_HEIGHT; dy scales with body strip vs ref so eyes track art after pad/header clamps. */
     static const EyeLayout eyes[] = {
-        { 0.36f, 0.19f, 0, 394 },
-        { 0.595f, 0.19f, -747, 380 },
+        { 0.36f, 0.19f, 30, 390 },
+        { 0.595f, 0.19f, -751, 380 },
     };
     const int n_eyes = (int)(sizeof(eyes) / sizeof(eyes[0]));
     const int body_h = H - body_y;

@@ -128,16 +128,65 @@ ensure_pi_zero_hdmi_1080() {
 hdmi_group=1
 hdmi_mode=16
 hdmi_force_hotplug=1
+hdmi_ignore_edid=0xa5000080
 
 [pi0]
 hdmi_group=1
 hdmi_mode=16
 hdmi_force_hotplug=1
+hdmi_ignore_edid=0xa5000080
 ZERO_HDMI_EOF
-  echo "  Added [pi02]/[pi0] hdmi_group=1 hdmi_mode=16 — reboot once for 1080p HDMI enumeration"
+  echo "  Added [pi02]/[pi0] 1080p HDMI block + hdmi_ignore_edid — reboot once for stable 1080p enumeration"
 }
 
 ensure_pi_zero_hdmi_1080
+
+# Pi Zero family on Trixie+ (full KMS): the vc4 driver re-probes EDID each
+# time a new DRM master opens the device.  The Pi Zero HDMI interface fails
+# the re-read (0-byte EDID), leaving only VGA fallback modes (1024×768).
+# Fix: install a custom 1080p EDID firmware file and tell the kernel to use
+# it instead of reading from the cable.
+ensure_pi_zero_edid_firmware() {
+  local model
+  model="$(tr -d '\000' </proc/device-tree/model 2>/dev/null || true)"
+  case "$model" in
+    *Zero*) ;;
+    *) return ;;
+  esac
+
+  local edid_dir="/lib/firmware/edid"
+  local edid_file="${edid_dir}/1080p.bin"
+  if [ ! -f "$edid_file" ]; then
+    python3 "$SCRIPT_DIR/gen_edid_1080p.py" /tmp/1080p_edid.bin
+    sudo mkdir -p "$edid_dir"
+    sudo cp /tmp/1080p_edid.bin "$edid_file"
+    echo "  installed custom 1080p EDID firmware ($edid_file)"
+  else
+    echo "  custom 1080p EDID firmware already installed"
+  fi
+
+  local need_edid_param=0 need_video_param=0
+  if ! tr ' ' '\n' < "$BOOT_CMDLINE" | grep -q '^drm.edid_firmware='; then
+    need_edid_param=1
+  fi
+  if ! tr ' ' '\n' < "$BOOT_CMDLINE" | grep -q '^video='; then
+    need_video_param=1
+  fi
+  if [ "$need_edid_param" -eq 1 ] || [ "$need_video_param" -eq 1 ]; then
+    sudo cp -n "$BOOT_CMDLINE" "${BOOT_CMDLINE}.bak.edid" 2>/dev/null || true
+    if [ "$need_edid_param" -eq 1 ]; then
+      sudo sed -i "1s|$| drm.edid_firmware=HDMI-A-1:edid/1080p.bin|" "$BOOT_CMDLINE"
+    fi
+    if [ "$need_video_param" -eq 1 ]; then
+      sudo sed -i "1s|$| video=HDMI-A-1:1920x1080@60e|" "$BOOT_CMDLINE"
+    fi
+    echo "  added EDID firmware + video mode to kernel cmdline — reboot to apply"
+  else
+    echo "  kernel cmdline already has EDID firmware + video params"
+  fi
+}
+
+ensure_pi_zero_edid_firmware
 
 # ---------------------------------------------------------------------------
 # 4. USB gadget Ethernet for commissioning
@@ -348,7 +397,7 @@ echo "  arrival-board.service installed (starts on boot after reboot)"
 SUDOERS_FILE="/etc/sudoers.d/arrival-board-config"
 sudo tee "$SUDOERS_FILE" >/dev/null <<EOF
 # Direct path (if +x) and /bin/bash wrapper (modeless deploys); config_mode.c uses sudo bash ... stop-ap
-$(id -un) ALL=(root) NOPASSWD: ${PROJECT_DIR}/tools/config_network.sh *, /bin/bash ${PROJECT_DIR}/tools/config_network.sh *
+$(id -un) ALL=(root) NOPASSWD: ${PROJECT_DIR}/tools/config_network.sh *, /bin/bash ${PROJECT_DIR}/tools/config_network.sh *, /usr/bin/tee /sys/class/drm/card0-HDMI-A-1/status
 EOF
 sudo chmod 0440 "$SUDOERS_FILE"
 sudo visudo -cf "$SUDOERS_FILE" >/dev/null
