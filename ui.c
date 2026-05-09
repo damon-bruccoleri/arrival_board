@@ -319,7 +319,7 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
      *   x = nx * W,  y = body_y + ny * bg_h
      * matches the artwork (must not use tile body_h, which omits bottom pad).
      */
-    const float exhaust_nx[STEAM_PUFFS] = { 0.44f, 0.80f };
+    const float exhaust_nx[STEAM_PUFFS] = { 0.26f, 0.80f };
     const float exhaust_ny[STEAM_PUFFS] = { 0.48f, 0.48f };
     const float rise_speed = 4.4f;
     const float fade_speed = 0.28f;
@@ -406,8 +406,8 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
     /* dx, dy: tuned at LAYOUT_REF_HEIGHT; dy scales with body strip vs ref so eyes track art after pad/header clamps. */
     static const EyeLayout eyes[] = {
-        { 0.36f, 0.19f,   30, 380 },
-        { 0.595f, 0.19f, -701, 372 },
+        { 0.36f, 0.19f,   30, 370 },
+        { 0.595f, 0.19f, -651, 362 },
     };
     const int n_eyes = (int)(sizeof(eyes) / sizeof(eyes[0]));
     const int body_h = H - body_y;
