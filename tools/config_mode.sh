@@ -44,12 +44,20 @@ case "${1:-}" in
     status "Loading bus stop list"
     python3 "$ROOT_DIR/tools/config_portal/portal.py" --refresh-stops >/dev/null 2>&1 || true
     status "Starting hotspot"
-    if ! sudo -n "$SCRIPT_DIR/config_network.sh" start-ap; then
-      status "Apply failed: hotspot start failed"
+    start_err="$(mktemp /tmp/arrival_board_hotspot_start.XXXXXX)"
+    if ! sudo -n /bin/bash "$SCRIPT_DIR/config_network.sh" start-ap 2>"$start_err"; then
+      reason="$(tr '\n' ' ' < "$start_err" | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//')"
+      rm -f "$start_err" 2>/dev/null || true
+      if [ -z "$reason" ]; then
+        status "Apply failed: hotspot start failed"
+      else
+        status "Apply failed: hotspot start failed ($reason)"
+      fi
       # Keep helper alive briefly so UI can show explicit failure text.
       sleep 10
       exit 1
     fi
+    rm -f "$start_err" 2>/dev/null || true
     status "Hotspot enabled. Connect to ArrivalBoard"
     monitor_phone_connection &
     cd "$ROOT_DIR"
