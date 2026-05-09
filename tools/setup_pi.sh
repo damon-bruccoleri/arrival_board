@@ -114,6 +114,31 @@ if command -v vcgencmd >/dev/null 2>&1; then
   echo "  $(vcgencmd get_mem gpu 2>/dev/null | tr -d '\r') — after changing gpu_mem, reboot to apply; 128 MB is typical for KMS HDMI on Pi Zero."
 fi
 
+# Pi Zero family + some 4K TVs: KMS may only advertise 1024×768 without a negotiated 1080p mode.
+# CEA hdmi_mode=16 (1080p 60 Hz), firmware-scoped tags so Pi 4/Pi 5 unchanged.
+ensure_pi_zero_hdmi_1080() {
+  if grep -q '# arrival_board: hdmi 1080p60 CE for Pi Zero' "$BOOT_CONFIG" 2>/dev/null; then
+    echo "  config.txt already has Pi Zero HDMI 1080p block (skipped)"
+    return
+  fi
+  sudo tee -a "$BOOT_CONFIG" >/dev/null <<'ZERO_HDMI_EOF'
+
+# arrival_board: hdmi 1080p60 CE for Pi Zero / Zero W / Zero 2 W (avoids KMS 1024×768-only lists)
+[pi02]
+hdmi_group=1
+hdmi_mode=16
+hdmi_force_hotplug=1
+
+[pi0]
+hdmi_group=1
+hdmi_mode=16
+hdmi_force_hotplug=1
+ZERO_HDMI_EOF
+  echo "  Added [pi02]/[pi0] hdmi_group=1 hdmi_mode=16 — reboot once for 1080p HDMI enumeration"
+}
+
+ensure_pi_zero_hdmi_1080
+
 # ---------------------------------------------------------------------------
 # 4. USB gadget Ethernet for commissioning
 # ---------------------------------------------------------------------------
