@@ -8,10 +8,12 @@
  * - Flip triggers are non-blocking and ignore re-triggers while a flip is active.
  */
 #include "audio.h"
+#include "util.h"
 #include <SDL2/SDL.h>
 
 #include <stdint.h>
 #include <stdio.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -160,6 +162,8 @@ static void write_mix_output(Uint8 *stream, int len, int frames, int channels,
                              const int32_t *acc, SDL_AudioFormat dev_fmt) {
     const int samples = frames * channels;
     /* Avoid duplicate `case` labels when SYS and LSB formats coincide on LE. */
+    /* PipeWire's HDMI Pulse sink is often S32 LE; Pulse previously reported float32 —
+     * both must work or the callback emits silence. */
     if (dev_fmt == AUDIO_S16SYS || dev_fmt == AUDIO_S16LSB || dev_fmt == AUDIO_S16MSB) {
         int16_t *out = (int16_t *)stream;
         for (int i = 0; i < samples; i++)
@@ -169,7 +173,18 @@ static void write_mix_output(Uint8 *stream, int len, int frames, int channels,
         const float scale = 1.0f / 32768.0f;
         for (int i = 0; i < samples; i++)
             out[i] = (float)clamp_s16(acc[i]) * scale;
+    } else if (dev_fmt == AUDIO_S32SYS || dev_fmt == AUDIO_S32LSB || dev_fmt == AUDIO_S32MSB) {
+        int32_t *out = (int32_t *)stream;
+        for (int i = 0; i < samples; i++)
+            out[i] = (int32_t)clamp_s16(acc[i]) << 16;
     } else {
+        static int warned_once;
+        if (!warned_once) {
+            warned_once = 1;
+            logf_("AUDIO: unsupported SDL device sample format 0x%x → silence "
+                  "(add branch in audio.c write_mix_output)",
+                  (unsigned)dev_fmt);
+        }
         memset(stream, 0, (size_t)len);
     }
 }
@@ -265,8 +280,7 @@ int audio_init(const char *music_path, const char *ferry_path, const char *flip_
         return 0;
 
     if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
-        if (audio_debug_enabled())
-            fprintf(stderr, "AUDIO_DEBUG: SDL_INIT_AUDIO failed: %s\n", SDL_GetError());
+        logf_("AUDIO: SDL_INIT_AUDIO failed: %s", SDL_GetError());
         return -1;
     }
 
@@ -281,13 +295,55 @@ int audio_init(const char *music_path, const char *ferry_path, const char *flip_
 
     SDL_AudioSpec have;
     SDL_zero(have);
-    SDL_AudioDeviceID dev = SDL_OpenAudioDevice(NULL, 0, &want, &have,
-                                                SDL_AUDIO_ALLOW_FREQUENCY_CHANGE |
-                                                SDL_AUDIO_ALLOW_CHANNELS_CHANGE);
+
+    /* run_arrival_board exports PULSE_SINK so libpulse default matches the hdmi Sink. */
+    const Uint32 allow_chg =
+        SDL_AUDIO_ALLOW_FREQUENCY_CHANGE | SDL_AUDIO_ALLOW_CHANNELS_CHANGE;
+    SDL_AudioDeviceID dev =
+        SDL_OpenAudioDevice(NULL, 0, &want, &have, allow_chg);
+
+#if defined(__linux__)
     if (!dev) {
-        if (audio_debug_enabled())
-            fprintf(stderr, "AUDIO_DEBUG: SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+        SDL_ClearError();
+        logf_("AUDIO: Pulse open failed: %s; trying ALSA plughw", SDL_GetError());
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
+        if (setenv("SDL_AUDIODRIVER", "alsa", 1) != 0)
+            logf_("AUDIO: setenv(SDL_AUDIODRIVER=alsa) failed");
+
+        SDL_zero(have);
+        if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
+            logf_("AUDIO: SDL_InitSubSystem(ALSA) failed: %s - sound disabled",
+                  SDL_GetError());
+            return -1;
+        }
+
+        const char *alsa_dev = getenv("ARRIVAL_BOARD_ALSA_DEV");
+        if (!alsa_dev || !alsa_dev[0])
+            alsa_dev = "plughw:CARD=vc4hdmi,DEV=0";
+        dev = SDL_OpenAudioDevice(alsa_dev, 0, &want, &have, allow_chg);
+        if (!dev)
+            dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, allow_chg);
+        if (!dev)
+            logf_("AUDIO: ALSA open (%s): %s - sound disabled", alsa_dev,
+                  SDL_GetError());
+    }
+#else
+    if (!dev)
+        logf_("AUDIO: Pulse open failed: %s - sound disabled", SDL_GetError());
+#endif
+
+    if (!dev) {
+        SDL_ClearError();
+        SDL_QuitSubSystem(SDL_INIT_AUDIO);
         return -1;
+    }
+
+    {
+        const char *ps = getenv("PULSE_SINK");
+        logf_("AUDIO: driver=%s PULSE_SINK=%s fmt=0x%x %d Hz %d ch (mix S16)",
+              SDL_GetCurrentAudioDriver() ? SDL_GetCurrentAudioDriver() : "?",
+              (ps && ps[0]) ? ps : "(unset)",
+              (unsigned)have.format, have.freq, have.channels);
     }
 
     memset(&g_audio, 0, sizeof(g_audio));

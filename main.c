@@ -459,9 +459,11 @@ int main(int argc, char **argv) {
                                 cfg.emoji_font_path, "EMOJI_FONT_PATH", "fonts-noto-color-emoji");
 
     /* In-process SDL2 audio engine: mixes flip over music; Pi Zero disables music/ferry in config.c. */
-    (void)audio_init(cfg.music_path[0] ? cfg.music_path : NULL,
-                     cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
-                     cfg.flip_path[0] ? cfg.flip_path : NULL);
+    if (audio_init(cfg.music_path[0] ? cfg.music_path : NULL,
+                   cfg.music_loop2_path[0] ? cfg.music_loop2_path : NULL,
+                   cfg.flip_path[0] ? cfg.flip_path : NULL) != 0) {
+        logf_("AUDIO: disabled (SDL init failure); kiosk continues without sound");
+    }
 
     /* Draw one immediate frame so the display is not blank while the fetch
      * thread performs its initial GTFS download and first MTA poll. */

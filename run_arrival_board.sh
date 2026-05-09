@@ -93,6 +93,14 @@ else
   else
     pactl set-default-sink alsa_output.platform-fef00700.hdmi.hdmi-stereo 2>/dev/null || true
   fi
+  # PipeWire+SDL: SDL_OpenAudioDevice(NULL,...) often fails ("Could not connect PulseAudio stream")
+  # while the same Sink works if named explicitly — match working `paplay --device="$(pactl ...)`.
+  # libpulse default stream ignores pactl Default Sink unless PULSE_SINK is set —
+  # paplay fails without `-d`; SDL_pulse hits the same bug on PipeWire.
+  sink_default="$(pactl get-default-sink 2>/dev/null | tr -d '\r\n')"
+  if [ -n "$sink_default" ]; then
+    export PULSE_SINK="$sink_default"
+  fi
 fi
 
 PI_MODEL="$(tr -d '\000' </proc/device-tree/model 2>/dev/null || true)"
