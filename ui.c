@@ -406,8 +406,8 @@ static void draw_background_and_steam(SDL_Renderer *r, int W, int H,
 static void draw_eyes(SDL_Renderer *r, int W, int H, int body_y, float scale) {
     /* dx, dy: tuned at LAYOUT_REF_HEIGHT; dy scales with body strip vs ref so eyes track art after pad/header clamps. */
     static const EyeLayout eyes[] = {
-        { 0.36f, 0.19f, -70, 400 },
-        { 0.595f, 0.19f, -741, 382 },
+        { 0.36f, 0.19f, -30, 396 },
+        { 0.595f, 0.19f, -745, 380 },
     };
     const int n_eyes = (int)(sizeof(eyes) / sizeof(eyes[0]));
     const int body_h = H - body_y;
