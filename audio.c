@@ -3,7 +3,8 @@
  *
  * Implementation notes:
  * - A single SDL audio device is opened once; the callback mixes music + ferry + flip.
- * - Assets are loaded once at startup and converted to the device format.
+ * - Assets are decoded to S16 (device rate/channels); callback converts to the
+ *   device's sample format (PipeWire often exposes float32 → silence if mishandled).
  * - Flip triggers are non-blocking and ignore re-triggers while a flip is active.
  */
 #include "audio.h"
@@ -16,11 +17,12 @@
 
 typedef struct {
     SDL_AudioDeviceID dev;
-    SDL_AudioSpec have;
+    SDL_AudioSpec have; /* opened SDL/Pulse device (often AUDIO_F32SYS on PipeWire) */
+    SDL_AudioSpec mix;  /* music/ferry/flip buffers: always AUDIO_S16SYS + have.freq/ch */
     int initialized;
     int paused;
 
-    /* Pre-converted interleaved S16 samples in device format. */
+    /* Decoded WAV PCM interleaved S16 (see mix). */
     Uint8 *music_buf;
     uint32_t music_bytes;
     uint32_t music_pos_frames;     /* position within cycle */
@@ -154,12 +156,29 @@ static void mix_from_buf_s16(int32_t *acc, int frames, int channels,
     }
 }
 
+static void write_mix_output(Uint8 *stream, int len, int frames, int channels,
+                             const int32_t *acc, SDL_AudioFormat dev_fmt) {
+    const int samples = frames * channels;
+    /* Avoid duplicate `case` labels when SYS and LSB formats coincide on LE. */
+    if (dev_fmt == AUDIO_S16SYS || dev_fmt == AUDIO_S16LSB || dev_fmt == AUDIO_S16MSB) {
+        int16_t *out = (int16_t *)stream;
+        for (int i = 0; i < samples; i++)
+            out[i] = clamp_s16(acc[i]);
+    } else if (dev_fmt == AUDIO_F32SYS || dev_fmt == AUDIO_F32LSB || dev_fmt == AUDIO_F32MSB) {
+        float *out = (float *)stream;
+        const float scale = 1.0f / 32768.0f;
+        for (int i = 0; i < samples; i++)
+            out[i] = (float)clamp_s16(acc[i]) * scale;
+    } else {
+        memset(stream, 0, (size_t)len);
+    }
+}
+
 static void audio_callback(void *userdata, Uint8 *stream, int len) {
     (void)userdata;
     if (!stream || len <= 0) return;
 
     if (!g_audio.initialized || g_audio.paused ||
-        g_audio.have.format != AUDIO_S16SYS ||
         (g_audio.have.channels != 1 && g_audio.have.channels != 2)) {
         memset(stream, 0, (size_t)len);
         return;
@@ -218,7 +237,7 @@ static void audio_callback(void *userdata, Uint8 *stream, int len) {
 
     /* --- Ferry overlay (optional) --- */
     if (g_audio.ferry_active && g_audio.ferry_buf && g_audio.ferry_bytes > 0) {
-        uint32_t ferry_frames = g_audio.ferry_bytes / bytes_per_frame(&g_audio.have);
+        uint32_t ferry_frames = g_audio.ferry_bytes / bytes_per_frame(&g_audio.mix);
         mix_from_buf_s16(acc, frames, channels, g_audio.ferry_buf, ferry_frames, g_audio.ferry_pos_frames, 0.35f);
         g_audio.ferry_pos_frames += (uint32_t)frames;
         if (g_audio.ferry_pos_frames >= ferry_frames) {
@@ -229,7 +248,7 @@ static void audio_callback(void *userdata, Uint8 *stream, int len) {
 
     /* --- Flip (one at a time; ignore retriggers while active) --- */
     if (g_audio.flip_active && g_audio.flip_buf && g_audio.flip_bytes > 0) {
-        uint32_t flip_frames = g_audio.flip_bytes / bytes_per_frame(&g_audio.have);
+        uint32_t flip_frames = g_audio.flip_bytes / bytes_per_frame(&g_audio.mix);
         mix_from_buf_s16(acc, frames, channels, g_audio.flip_buf, flip_frames, g_audio.flip_pos_frames, 1.0f);
         g_audio.flip_pos_frames += (uint32_t)frames;
         if (g_audio.flip_pos_frames >= flip_frames) {
@@ -238,10 +257,7 @@ static void audio_callback(void *userdata, Uint8 *stream, int len) {
         }
     }
 
-    /* Write out */
-    int16_t *out = (int16_t *)stream;
-    for (int i = 0; i < frames * channels; i++)
-        out[i] = clamp_s16(acc[i]);
+    write_mix_output(stream, len, frames, channels, acc, g_audio.have.format);
 }
 
 int audio_init(const char *music_path, const char *ferry_path, const char *flip_path) {
@@ -277,6 +293,8 @@ int audio_init(const char *music_path, const char *ferry_path, const char *flip_
     memset(&g_audio, 0, sizeof(g_audio));
     g_audio.dev = dev;
     g_audio.have = have;
+    g_audio.mix = have;
+    g_audio.mix.format = AUDIO_S16SYS;
     g_audio.initialized = 1;
     g_audio.paused = 0;
 
@@ -294,13 +312,13 @@ int audio_init(const char *music_path, const char *ferry_path, const char *flip_
         return -1;
     }
 
-    /* Convert/preload assets */
-    (void)load_and_convert(flip_path, &g_audio.have, &g_audio.flip_buf, &g_audio.flip_bytes);
-    (void)load_and_convert(music_path, &g_audio.have, &g_audio.music_buf, &g_audio.music_bytes);
-    (void)load_and_convert(ferry_path, &g_audio.have, &g_audio.ferry_buf, &g_audio.ferry_bytes);
+    /* Decode assets to S16 at device rate/channels (mix.path); output conversion uses have.format. */
+    (void)load_and_convert(flip_path, &g_audio.mix, &g_audio.flip_buf, &g_audio.flip_bytes);
+    (void)load_and_convert(music_path, &g_audio.mix, &g_audio.music_buf, &g_audio.music_bytes);
+    (void)load_and_convert(ferry_path, &g_audio.mix, &g_audio.ferry_buf, &g_audio.ferry_bytes);
 
     /* Configure looping music cycle/gap */
-    uint32_t bpf = bytes_per_frame(&g_audio.have);
+    uint32_t bpf = bytes_per_frame(&g_audio.mix);
     if (g_audio.music_buf && g_audio.music_bytes > 0 && bpf > 0) {
         g_audio.music_file_frames = g_audio.music_bytes / bpf;
         int music_sec = parse_env_int("MUSIC_DURATION_SEC", 23, 1, 600);
@@ -313,6 +331,8 @@ int audio_init(const char *music_path, const char *ferry_path, const char *flip_
     if (audio_debug_enabled()) {
         fprintf(stderr, "AUDIO_DEBUG: device freq=%d ch=%d fmt=0x%x samples=%d\n",
                 g_audio.have.freq, g_audio.have.channels, g_audio.have.format, g_audio.have.samples);
+        fprintf(stderr, "AUDIO_DEBUG: internal mix fmt=0x%x same freq/ch as device\n",
+                g_audio.mix.format);
         fprintf(stderr, "AUDIO_DEBUG: mix_acc_frames=%u\n", g_audio.mix_acc_frames);
         fprintf(stderr, "AUDIO_DEBUG: music=%s bytes=%u\n", (music_path && *music_path) ? music_path : "(none)", g_audio.music_bytes);
         fprintf(stderr, "AUDIO_DEBUG: ferry=%s bytes=%u\n", (ferry_path && *ferry_path) ? ferry_path : "(none)", g_audio.ferry_bytes);
