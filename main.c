@@ -371,6 +371,11 @@ int main(int argc, char **argv) {
     }
     SDL_SetHint("SDL_RENDER_BATCHING", "1");
 
+    /*
+     * Pi Zero family: use SDL_WINDOW_FULLSCREEN (explicit mode) not FULLSCREEN_DESKTOP.
+     * After exit, the KMS console often falls back to ~1024×768; DESKTOP would adopt that on
+     * the next start while a cold boot still looks like 1080p — matching "768p after restart".
+     */
     Uint32 winflags = SDL_WINDOW_FULLSCREEN_DESKTOP;
     int target_w = 3840;
     int target_h = 2160;
@@ -383,7 +388,8 @@ int main(int argc, char **argv) {
         if (strstr(buf_model, "Zero")) {
             target_w = 1920;
             target_h = 1080;
-            logf_("Pi Zero detected (v1 or v2): setting logical resolution to 1080p.");
+            winflags = SDL_WINDOW_FULLSCREEN;
+            logf_("Pi Zero detected (v1 or v2): 1080p logical + SDL_WINDOW_FULLSCREEN (avoid stale desktop mode).");
         }
     }
 
