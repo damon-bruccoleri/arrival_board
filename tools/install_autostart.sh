@@ -2,6 +2,8 @@
 # install_autostart.sh — systemd user unit for Arrival Board at boot (Lite / kiosk).
 # Idempotent. Run from repo: bash tools/install_autostart.sh
 # Requires: loginctl enable-linger for user (done here with sudo).
+# Raspberry Pi OS Debian 13 (Trixie): prefer a user service (not a system
+# service) so kmsdrm + PipeWire run in the logged-in user's runtime/session.
 
 set -euo pipefail
 

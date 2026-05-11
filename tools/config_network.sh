@@ -13,8 +13,11 @@ HOSTAPD_PID="/tmp/arrival_board_hostapd.pid"
 DNSMASQ_PID="/tmp/arrival_board_dnsmasq.pid"
 
 status() {
-  rm -f "$STATUS_PATH" 2>/dev/null || true
-  printf '%s\n' "$*" > "$STATUS_PATH" 2>/dev/null || true
+  local tmp
+  tmp="$(mktemp "${STATUS_PATH}.XXXXXX" 2>/dev/null || mktemp /tmp/arrival_board_status.XXXXXX)"
+  printf '%s\n' "$*" > "$tmp" 2>/dev/null || true
+  sync >/dev/null 2>&1 || true
+  mv -f "$tmp" "$STATUS_PATH" 2>/dev/null || true
   if [ -n "${SUDO_USER:-}" ]; then
     chown "$SUDO_USER:$SUDO_USER" "$STATUS_PATH" 2>/dev/null || true
   fi
@@ -61,6 +64,7 @@ with open(out_path, "w", encoding="utf-8") as f:
     json.dump(sorted(ssids), f)
 PY
   chmod 644 "$SCAN_PATH" 2>/dev/null || true
+  sync >/dev/null 2>&1 || true
 }
 
 stop_ap() {

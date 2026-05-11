@@ -54,6 +54,29 @@ def atomic_write_text(path: pathlib.Path, content: str, mode: int = 0o600) -> No
         raise
 
 
+def atomic_write_bytes(path: pathlib.Path, content: bytes, mode: int = 0o600) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as tmp:
+            tmp.write(content)
+            tmp.flush()
+            os.fsync(tmp.fileno())
+        os.chmod(tmp_name, mode)
+        os.replace(tmp_name, path)
+        dir_fd = os.open(str(path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except Exception:
+            pass
+        raise
+
+
 def set_status(message: str) -> None:
     try:
         atomic_write_text(STATUS_PATH, message + "\n", mode=0o666)
@@ -76,6 +99,13 @@ def current_env() -> dict[str, str]:
 def update_env(values: dict[str, str]) -> None:
     ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
     existing = ENV_PATH.read_text(encoding="utf-8", errors="replace").splitlines() if ENV_PATH.exists() else []
+    if ENV_PATH.exists():
+        try:
+            backup = ENV_PATH.with_suffix(ENV_PATH.suffix + ".bak")
+            if not backup.exists():
+                backup.write_text(ENV_PATH.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+        except Exception:
+            pass
     seen: set[str] = set()
     out: list[str] = []
     for line in existing:
@@ -115,9 +145,7 @@ def save_upload(filename: str, content: bytes, prefix: str) -> str:
         return ""
     CERT_DIR.mkdir(parents=True, exist_ok=True)
     path = CERT_DIR / f"{prefix}-{safe_filename(filename)}"
-    with path.open("wb") as f:
-        f.write(content)
-    os.chmod(path, 0o600)
+    atomic_write_bytes(path, content, mode=0o600)
     return str(path)
 
 
@@ -156,12 +184,7 @@ def refresh_stop_options() -> int:
                 stops.append({"id": value, "label": name})
 
     stops.sort(key=lambda item: (not item["id"].isdigit(), item["id"]))
-    STOPS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=".arrival_board_bus_stops.", dir=str(STOPS_PATH.parent))
-    with os.fdopen(fd, "w", encoding="utf-8") as tmp:
-        json.dump(stops, tmp, separators=(",", ":"))
-    os.chmod(tmp_name, 0o644)
-    os.replace(tmp_name, STOPS_PATH)
+    atomic_write_text(STOPS_PATH, json.dumps(stops, separators=(",", ":")), mode=0o644)
     return len(stops)
 
 

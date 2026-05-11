@@ -8,8 +8,11 @@ STATUS_PATH="${CONFIG_STATUS_PATH:-/tmp/arrival_board_config_status}"
 IFACE="${CONFIG_WIFI_IFACE:-wlan0}"
 
 status() {
-  rm -f "$STATUS_PATH" 2>/dev/null || true
-  printf '%s\n' "$*" > "$STATUS_PATH" 2>/dev/null || true
+  local tmp
+  tmp="$(mktemp "${STATUS_PATH}.XXXXXX" 2>/dev/null || mktemp /tmp/arrival_board_status.XXXXXX)"
+  printf '%s\n' "$*" > "$tmp" 2>/dev/null || true
+  sync >/dev/null 2>&1 || true
+  mv -f "$tmp" "$STATUS_PATH" 2>/dev/null || true
 }
 
 monitor_phone_connection() {

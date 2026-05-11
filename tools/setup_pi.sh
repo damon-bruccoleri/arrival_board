@@ -22,9 +22,33 @@ BOOT_CMDLINE="/boot/firmware/cmdline.txt"
 USB_GADGET_IP="${USB_GADGET_IP:-10.55.0.1/24}"
 USB_GADGET_HOST="${USB_GADGET_IP%%/*}"
 USB_GADGET_CON="${USB_GADGET_CON:-ArrivalBoard-USB-Gadget}"
+RUN_TAG="$(date +%Y%m%d%H%M%S)"
 
 log()  { printf '\n\033[1;32m>>> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33mWARN: %s\033[0m\n' "$*"; }
+
+atomic_install_file() {
+  local src="$1" dest="$2" mode
+  mode="$(stat -c '%a' "$dest" 2>/dev/null || echo 0644)"
+  sudo install -m "$mode" "$src" "$dest"
+  sync >/dev/null 2>&1 || true
+}
+
+backup_once() {
+  local file="$1" suffix="${2:-bak}"
+  [ -f "$file" ] || return 0
+  sudo cp -n "$file" "${file}.${suffix}" 2>/dev/null || true
+}
+
+validate_fstab_or_die() {
+  local candidate="$1"
+  if command -v findmnt >/dev/null 2>&1; then
+    if ! findmnt --verify --tab-file "$candidate" >/dev/null 2>&1; then
+      echo "ERROR: generated fstab failed validation; refusing to install." >&2
+      return 1
+    fi
+  fi
+}
 
 # ---------------------------------------------------------------------------
 # Sanity checks
@@ -76,26 +100,36 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${PKGS[@]}"
 # 3. GPU memory split
 # ---------------------------------------------------------------------------
 log "3/12  Configuring GPU memory (128 MB)"
-sudo cp -n "$BOOT_CONFIG" "${BOOT_CONFIG}.bak" 2>/dev/null || true
+backup_once "$BOOT_CONFIG" "bak.${RUN_TAG}"
 
 ensure_config() {
   local key="$1" value="$2"
-  if grep -q "^${key}=" "$BOOT_CONFIG" 2>/dev/null; then
-    sudo sed -i "s/^${key}=.*/${key}=${value}/" "$BOOT_CONFIG"
-  else
-    # Append under [all] if present, otherwise at end of file
-    if grep -q '^\[all\]' "$BOOT_CONFIG" 2>/dev/null; then
-      sudo sed -i "/^\[all\]/a ${key}=${value}" "$BOOT_CONFIG"
-    else
-      echo "${key}=${value}" | sudo tee -a "$BOOT_CONFIG" >/dev/null
-    fi
+  local tmp
+  tmp="$(mktemp)"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { done=0; has_all=0 }
+    /^\[all\]$/ { has_all=1; print; if (!done) { print key "=" value; done=1 }; next }
+    $0 ~ "^" key "=" { print key "=" value; done=1; next }
+    { print }
+    END {
+      if (!done && !has_all) print key "=" value
+    }
+  ' "$BOOT_CONFIG" > "$tmp"
+  if ! cmp -s "$tmp" "$BOOT_CONFIG"; then
+    atomic_install_file "$tmp" "$BOOT_CONFIG"
   fi
+  rm -f "$tmp"
 }
 
 ensure_boot_config_line() {
   local line="$1"
+  local tmp
   if ! grep -Fxq "$line" "$BOOT_CONFIG" 2>/dev/null; then
-    echo "$line" | sudo tee -a "$BOOT_CONFIG" >/dev/null
+    tmp="$(mktemp)"
+    cat "$BOOT_CONFIG" > "$tmp"
+    printf '%s\n' "$line" >> "$tmp"
+    atomic_install_file "$tmp" "$BOOT_CONFIG"
+    rm -f "$tmp"
   fi
 }
 
@@ -173,13 +207,19 @@ ensure_pi_zero_edid_firmware() {
     need_video_param=1
   fi
   if [ "$need_edid_param" -eq 1 ] || [ "$need_video_param" -eq 1 ]; then
-    sudo cp -n "$BOOT_CMDLINE" "${BOOT_CMDLINE}.bak.edid" 2>/dev/null || true
+    backup_once "$BOOT_CMDLINE" "bak.edid.${RUN_TAG}"
+    local cmdline tmp
+    cmdline="$(tr -d '\n' < "$BOOT_CMDLINE")"
     if [ "$need_edid_param" -eq 1 ]; then
-      sudo sed -i "1s|$| drm.edid_firmware=HDMI-A-1:edid/1080p.bin|" "$BOOT_CMDLINE"
+      cmdline="${cmdline} drm.edid_firmware=HDMI-A-1:edid/1080p.bin"
     fi
     if [ "$need_video_param" -eq 1 ]; then
-      sudo sed -i "1s|$| video=HDMI-A-1:1920x1080@60e|" "$BOOT_CMDLINE"
+      cmdline="${cmdline} video=HDMI-A-1:1920x1080@60e"
     fi
+    tmp="$(mktemp)"
+    printf '%s\n' "$cmdline" > "$tmp"
+    atomic_install_file "$tmp" "$BOOT_CMDLINE"
+    rm -f "$tmp"
     echo "  added EDID firmware + video mode to kernel cmdline — reboot to apply"
   else
     echo "  kernel cmdline already has EDID firmware + video params"
@@ -199,20 +239,25 @@ ensure_cmdline_modules() {
     warn "Boot cmdline not found at $BOOT_CMDLINE; skipping modules-load=${modules}"
     return
   fi
-  sudo cp -n "$BOOT_CMDLINE" "${BOOT_CMDLINE}.bak" 2>/dev/null || true
-  if tr ' ' '\n' < "$BOOT_CMDLINE" | grep -q '^modules-load='; then
+  backup_once "$BOOT_CMDLINE" "bak.modules.${RUN_TAG}"
+  local cmdline tmp
+  cmdline="$(tr -d '\n' < "$BOOT_CMDLINE")"
+  if printf '%s\n' "$cmdline" | tr ' ' '\n' | grep -q '^modules-load='; then
     local current
-    current="$(tr ' ' '\n' < "$BOOT_CMDLINE" | awk -F= '$1 == "modules-load" {print $2; exit}')"
+    current="$(printf '%s\n' "$cmdline" | tr ' ' '\n' | awk -F= '$1 == "modules-load" {print $2; exit}')"
     for module in ${modules//,/ }; do
       if ! printf '%s' "$current" | tr ',' '\n' | grep -qx "$module"; then
         current="${current},${module}"
       fi
     done
-    sudo sed -i "s/\(^\| \)modules-load=[^ ]*/ modules-load=${current}/" "$BOOT_CMDLINE"
-    sudo sed -i 's/^ //' "$BOOT_CMDLINE"
+    cmdline="$(printf '%s\n' "$cmdline" | sed "s/\(^\| \)modules-load=[^ ]*/ modules-load=${current}/" | sed 's/^ //')"
   else
-    sudo sed -i "1s/$/ modules-load=${modules}/" "$BOOT_CMDLINE"
+    cmdline="${cmdline} modules-load=${modules}"
   fi
+  tmp="$(mktemp)"
+  printf '%s\n' "$cmdline" > "$tmp"
+  atomic_install_file "$tmp" "$BOOT_CMDLINE"
+  rm -f "$tmp"
 }
 
 ensure_cmdline_modules "dwc2,g_ether"
@@ -282,15 +327,30 @@ fi
 
 # Remove /swapfile entry from fstab if present
 if grep -q '^/swapfile' /etc/fstab 2>/dev/null; then
-  sudo sed -i '/^\/swapfile/d' /etc/fstab
+  tmp="$(mktemp)"
+  awk '$0 !~ /^\/swapfile[[:space:]]/' /etc/fstab > "$tmp"
+  validate_fstab_or_die "$tmp"
+  atomic_install_file "$tmp" /etc/fstab
+  rm -f "$tmp"
   echo "  removed /swapfile from fstab"
 fi
 
 # Configure zram (compressed in-RAM swap, no SD writes)
 ZRAM_CONF="/etc/default/zramswap"
 if [ -f "$ZRAM_CONF" ]; then
-  sudo sed -i 's/^#\?PERCENTAGE=.*/PERCENTAGE=25/' "$ZRAM_CONF"
-  sudo sed -i 's/^#\?PRIORITY=.*/PRIORITY=100/' "$ZRAM_CONF"
+  tmp="$(mktemp)"
+  awk '
+    BEGIN { p=0; r=0 }
+    /^#?PERCENTAGE=/ { print "PERCENTAGE=25"; p=1; next }
+    /^#?PRIORITY=/ { print "PRIORITY=100"; r=1; next }
+    { print }
+    END {
+      if (!p) print "PERCENTAGE=25"
+      if (!r) print "PRIORITY=100"
+    }
+  ' "$ZRAM_CONF" > "$tmp"
+  atomic_install_file "$tmp" "$ZRAM_CONF"
+  rm -f "$tmp"
   echo "  zram configured (25% of RAM)"
 fi
 
@@ -299,7 +359,13 @@ add_tmpfs() {
   local mount="$1" size="$2" mode="$3"
   local line="tmpfs  ${mount}  tmpfs  defaults,noatime,mode=${mode},size=${size}  0  0"
   if ! grep -q "^tmpfs.*${mount}" /etc/fstab 2>/dev/null; then
-    echo "$line" | sudo tee -a /etc/fstab >/dev/null
+    local tmp
+    tmp="$(mktemp)"
+    cat /etc/fstab > "$tmp"
+    printf '%s\n' "$line" >> "$tmp"
+    validate_fstab_or_die "$tmp"
+    atomic_install_file "$tmp" /etc/fstab
+    rm -f "$tmp"
     echo "  added tmpfs ${mount} (${size})"
   fi
 }

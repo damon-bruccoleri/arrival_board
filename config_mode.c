@@ -37,10 +37,15 @@ static const char *self_check_status_path_default(void) {
 
 static void write_status(ConfigMode *cm, const char *status) {
     if (!cm || !cm->status_path[0] || !status) return;
-    FILE *f = fopen(cm->status_path, "w");
+    char tmp_path[300];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", cm->status_path);
+    FILE *f = fopen(tmp_path, "w");
     if (!f) return;
     fprintf(f, "%s\n", status);
+    fflush(f);
+    fsync(fileno(f));
     fclose(f);
+    rename(tmp_path, cm->status_path);
 }
 
 int config_mode_init(ConfigMode *cm) {
